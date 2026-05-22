@@ -41,7 +41,7 @@ fi
 
 # 5. سحب ملفات البوت من المستودع الجديد
 echo "[+] جاري سحب ملفات البوت من v2ray-blost..."
-git clone https://github.com/Affuyfuffyt/v2ray-blost.git $WORK_DIR
+git clone https://github.com/Affuyfuffyt/v2ray-blost4.git $WORK_DIR
 cd $WORK_DIR
 
 # 🔥 الخطوة السحرية: تبديل اسم المجلد داخل كل ملفات المشروع تلقائياً 🔥
