@@ -22,17 +22,17 @@ def show_main_menu(bot, chat_id, message_id=None):
     # ترتيب الأزرار في اللوحة
     markup.add(btn_create)
     markup.add(btn_manage)
-    markup.add(btn_servers) # 👈 زر السيرفرات صار متاح
+    markup.add(btn_servers)
     markup.add(btn_radar)
     markup.add(btn_speed)
     markup.add(btn_server)
     
-    welcome_text = "⚙️ مرحباً بك في لوحة تحكم V2Ray (النسخة الاحترافية)\nاختر من القائمة أدناه:"
+    welcome_text = "⚙️ **مرحباً بك في لوحة تحكم V2Ray (النسخة الاحترافية)**\nاختر من القائمة أدناه:"
     
     if message_id:
         try:
-            bot.edit_message_text(welcome_text, chat_id, message_id, reply_markup=markup)
+            bot.edit_message_text(welcome_text, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
         except:
-            bot.send_message(chat_id, welcome_text, reply_markup=markup)
+            bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode="Markdown")
     else:
-        bot.send_message(chat_id, welcome_text, reply_markup=markup)
+        bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode="Markdown")
