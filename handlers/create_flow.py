@@ -10,13 +10,14 @@ import threading
 import os
 import urllib.parse
 import ftplib
+import sqlite3
 from io import BytesIO
 
 # 👇 استدعاء دوال الحفظ وقاعدة البيانات
 from database import save_user, extend_json_expiry
 from db import (
-    add_user, get_active_users, set_user_expired, get_user_by_ref_code,
-    extend_user_expiry, assign_ref_code, add_pending_reward,
+    add_user, get_active_users, set_user_expired, get_user_by_ref_code, 
+    extend_user_expiry, assign_ref_code, add_pending_reward, 
     get_all_pending_rewards, remove_pending_reward, get_user_connection_seconds,
     get_all_servers, get_server_details
 )
@@ -45,6 +46,27 @@ def is_valid_uuid(val):
         return True
     except Exception:
         return False
+
+# ==========================================
+# 🛠️ أداة جلب بيانات المشترك لإعادة الزراعة
+# ==========================================
+def get_user_info_for_replant(email):
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(base_dir, "database.db")
+        if not os.path.exists(db_path):
+            db_path = "database.db"
+            
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute("SELECT uuid, server_id FROM users WHERE email=?", (email,))
+        res = c.fetchone()
+        conn.close()
+        if res:
+            return res[0], res[1]
+    except Exception as e:
+        print(f"Error fetching user info: {e}")
+    return None, 1
 
 # ==========================================
 # 🛠️ دالة الإضافة الذكية (VLESS فقط - المسار الموحد)
@@ -81,7 +103,6 @@ def add_client_to_config(user_name, uuid_val, protocol, server_id=1, bot=None, c
             ftp.retrbinary("RETR xray_core/config.json", r.write)
             config_data = json.loads(r.getvalue().decode('utf-8'))
 
-            # ⚠️ إصلاح setdefault: يجب أن نُمرّر القاموس فعلياً، لا قاموس مؤقت
             inbounds = config_data.setdefault("inbounds", [])
             if not inbounds:
                 if bot and chat_id:
@@ -204,23 +225,7 @@ def restart_alwaysdata(bot=None, chat_id=None, success_msg=None, fail_msg=None, 
     return False
 
 # ==========================================
-# ⏱️ العداد التنازلي لطرد المشترك
-# ==========================================
-def auto_restart_on_expiry(bot, chat_id, expiry_time, user_name, uuid_val, protocol, server_id=1):
-    wait_seconds = expiry_time - time.time()
-    if wait_seconds > 0:
-        time.sleep(wait_seconds)
-
-    # حذف المشترك من الكونفك (محلي أو بعيد)
-    remove_client_from_config(uuid_val, server_id)
-
-    success_msg = f"🛑 **تنبيه انتهاء صلاحية!** 🛑\n\n👤 المشترك: `{user_name}`\n⏳ انتهى وقته للتو.\n🔄 **تم سحب صلاحيته من السيرفر نهائياً!**"
-    fail_msg = f"⚠️ انتهى وقت `{user_name}` ولكن فشل الريستارت التلقائي للسيرفر!"
-    restart_alwaysdata(bot, chat_id, success_msg, fail_msg, server_id)
-
-
-# ==========================================
-# 👁️ مراقب قاعدة البيانات
+# 👁️ مراقب قاعدة البيانات (الذكي)
 # ==========================================
 def database_expiry_watchdog(bot):
     admin_id = None
@@ -236,7 +241,7 @@ def database_expiry_watchdog(bot):
 
     while True:
         try:
-            # 1. مراقبة انتهاء المشتركين
+            # 1. مراقبة انتهاء المشتركين (طرد الذين انتهى وقتهم المحدث فقط)
             active_users = get_active_users()
             current_time = time.time()
             expired_by_server = {}
@@ -258,18 +263,27 @@ def database_expiry_watchdog(bot):
                         msg = f"⚠️ تم مسح المشتركين ({names_str}) من السيرفر ({s_id}) ولكن فشل الريستارت!"
                     bot.send_message(admin_id, msg, parse_mode="Markdown")
 
-            # 2. مراقبة المكافآت المعلقة
+            # 2. مراقبة المكافآت وإعادة الزراعة (Re-plant)
             pending_rewards = get_all_pending_rewards()
             for ref_email, inv_email, reward_sec, c_id in pending_rewards:
                 if get_user_connection_seconds(inv_email) >= 60:
+                    # تمديد الوقت الفعلي
                     extend_user_expiry(ref_email, reward_sec)
                     try: extend_json_expiry(ref_email, reward_sec)
                     except: pass
+                    
+                    # 🔥 إعادة الزراعة والريستارت في حال كان الكود ممسوح
+                    user_uuid, user_server_id = get_user_info_for_replant(ref_email)
+                    if user_uuid:
+                        add_client_to_config(ref_email, user_uuid, "vless", user_server_id, bot, c_id)
+                        restart_alwaysdata(bot, c_id, f"🔄 تم تحديث السيرفر ({user_server_id}) لتفعيل المكافأة للداعي!", f"⚠️ فشل الريستارت للسيرفر ({user_server_id})", user_server_id)
+
                     remove_pending_reward(inv_email)
 
-                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` بنجاح لأن المشترك الجديد اتصل بالإنترنت! 🚀", parse_mode="Markdown")
+                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` وإعادة زراعة الكود بالسيرفر بنجاح! 🚀", parse_mode="Markdown")
                     notify_extension(bot, ref_email, reward_sec)
         except Exception as e:
+            print(f"Watchdog Error: {e}")
             pass
         time.sleep(60)
 
@@ -386,7 +400,6 @@ def register_create_handlers(bot):
         ask_protocol(chat_id, bot)
 
     def ask_protocol(chat_id, bot, message_id=None):
-        # تم تخطي سؤال البروتوكول، لأنه الآن VLESS إجباري
         creation_data[chat_id]['protocol'] = 'vless'
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(
@@ -573,8 +586,8 @@ def register_create_handlers(bot):
 
         data = creation_data[chat_id]
         server_id = data.get('server_id', 1)
-        protocol = "vless"  # تم تثبيت البروتوكول إجبارياً
-        fixed_path = "/xray"  # تم تثبيت المسار الجديد
+        protocol = "vless"
+        fixed_path = "/xray"
         data['path'] = fixed_path
 
         dur_str = data['duration_str']
@@ -591,7 +604,6 @@ def register_create_handlers(bot):
 
         expiry_time = time.time() + sec
 
-        # الإضافة لملف config.json
         bot.send_message(chat_id, "⏳ جاري زراعة الكود في السيرفر المطلوب، يرجى الانتظار...")
         success = add_client_to_config(data['name'], data['uuid'], protocol, server_id, bot, chat_id)
 
@@ -620,11 +632,7 @@ def register_create_handlers(bot):
             try: add_pending_reward(referrer_email, data['name'], reward_sec, chat_id)
             except: pass
 
-        threading.Thread(
-            target=auto_restart_on_expiry,
-            args=(bot, chat_id, expiry_time, data['name'], data['uuid'], protocol, server_id),
-            daemon=True
-        ).start()
+        # ⚠️ تمت إزالة الدالة الخطرة (auto_restart_on_expiry) لأنها كانت تمسح الكود وتلغي التمديد
 
         selected_port = data.get('port', 443)
 
