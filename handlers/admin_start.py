@@ -2,9 +2,6 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def show_main_menu(bot, chat_id, message_id=None):
-    # 🔥 الحل الجذري لمشكلة الرجوع: تنظيف أي أوامر أو إدخالات معلقة فوراً
-    bot.clear_step_handler_by_chat_id(chat_id)
-    
     # إنشاء لوحة المفاتيح الشفافة
     markup = InlineKeyboardMarkup(row_width=1)
     
@@ -25,17 +22,17 @@ def show_main_menu(bot, chat_id, message_id=None):
     # ترتيب الأزرار في اللوحة
     markup.add(btn_create)
     markup.add(btn_manage)
-    markup.add(btn_servers)
+    markup.add(btn_servers) # 👈 زر السيرفرات صار متاح
     markup.add(btn_radar)
     markup.add(btn_speed)
     markup.add(btn_server)
     
-    welcome_text = "⚙️ **مرحباً بك في لوحة تحكم V2Ray (النسخة الاحترافية)**\nاختر من القائمة أدناه:"
+    welcome_text = "⚙️ مرحباً بك في لوحة تحكم V2Ray (النسخة الاحترافية)\nاختر من القائمة أدناه:"
     
     if message_id:
         try:
-            bot.edit_message_text(welcome_text, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text(welcome_text, chat_id, message_id, reply_markup=markup)
         except:
-            bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode="Markdown")
+            bot.send_message(chat_id, welcome_text, reply_markup=markup)
     else:
-        bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(chat_id, welcome_text, reply_markup=markup)
