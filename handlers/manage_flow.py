@@ -120,7 +120,6 @@ def register_manage_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data == "manage_users")
     def show_users_list(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         db = load_db()
         
         if not db:
@@ -132,9 +131,6 @@ def register_manage_handlers(bot):
             status = "🟢" if data.get('is_active', True) else "🔴"
             markup.add(InlineKeyboardButton(f"{status} {email}", callback_data=f"user_{email}"))
         
-        # 🔥 إضافة زر الرجوع للقائمة الرئيسية 🔥
-        markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="main_menu"))
-        
         bot.edit_message_text("👥 **قائمة المشتركين:**\nاختر مشتركاً لعرض تفاصيله:", 
                               chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
@@ -142,7 +138,6 @@ def register_manage_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("user_"))
     def show_user_details(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         email = call.data.split('user_')[1]
         
         db = load_db()
@@ -192,7 +187,6 @@ def register_manage_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("del_"))
     def delete_client(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         email = call.data.split("del_")[1]
         
         db_data = load_db()
@@ -235,9 +229,8 @@ def register_manage_handlers(bot):
     # ==================================================
     @bot.callback_query_handler(func=lambda call: call.data.startswith("renew_"))
     def start_renew(call):
-        chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         email = call.data.split("renew_")[1]
+        chat_id = call.message.chat.id
         renew_data[chat_id] = {'email': email}
         
         markup = InlineKeyboardMarkup(row_width=3)
@@ -248,14 +241,11 @@ def register_manage_handlers(bot):
             InlineKeyboardButton("شهر", callback_data="rdur_30d"),
             InlineKeyboardButton("مدة يدوية ✍️", callback_data="rdur_manual")
         )
-        markup.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"user_{email}")) # 🔥 زر رجوع
-        
         bot.edit_message_text(f"♻️ تمديد للمشترك `{email}`\n\n⏳ اختر المدة الجديدة:", chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("rdur_"))
     def ask_renew_quota(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         choice = call.data.split('_')[1]
         
         if choice == "manual":
@@ -285,7 +275,6 @@ def register_manage_handlers(bot):
             InlineKeyboardButton("بلا حدود ♾️", callback_data="rquota_unlimited"),
             InlineKeyboardButton("سعة يدوية ✍️", callback_data="rquota_manual")
         )
-        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="manage_users")) # 🔥 زر رجوع
         text = "📊 حدد السعة الجديدة للتمديد:"
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
@@ -295,7 +284,6 @@ def register_manage_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("rquota_"))
     def ask_renew_protocol(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         choice = call.data.split('_')[1]
         
         if choice == "manual":
@@ -323,7 +311,6 @@ def register_manage_handlers(bot):
             InlineKeyboardButton("VMESS", callback_data="rproto_vmess"),
             InlineKeyboardButton("Trojan", callback_data="rproto_trojan")
         )
-        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="manage_users")) # 🔥 زر رجوع
         text = "🌐 **أخيراً.. اختر بروتوكول المشترك لإعادة تفعيله:**"
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
@@ -333,7 +320,6 @@ def register_manage_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("rproto_"))
     def finalize_renew(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         protocol = call.data.split('_')[1]
         
         data = renew_data.get(chat_id)
