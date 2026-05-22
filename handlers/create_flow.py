@@ -259,7 +259,7 @@ def restart_alwaysdata(bot=None, chat_id=None, success_msg=None, fail_msg=None, 
     return False
 
 # ==========================================
-# 👁️ مراقب قاعدة البيانات (الذكي وحلال المشاكل)
+# 👁️ مراقب قاعدة البيانات
 # ==========================================
 def database_expiry_watchdog(bot):
     admin_id = None
@@ -315,7 +315,6 @@ def database_expiry_watchdog(bot):
                             if not user_port: user_port = 443
                             now = time.time()
                             
-                            # تعديل وقت الانتهاء
                             if current_expiry and float(current_expiry) < now:
                                 new_expiry = now + reward_sec
                             else:
@@ -327,14 +326,12 @@ def database_expiry_watchdog(bot):
                     except Exception as e:
                         print(f"DB Replant Error: {e}")
 
-                    # مسح الكود القديم إن وجد، ثم زراعته من جديد لضمان التفعيل التام
                     if user_uuid:
                         remove_client_from_config(user_uuid, user_server_id)
                         time.sleep(1)
                         add_client_to_config(ref_email, user_uuid, "vless", user_server_id)
                         restart_alwaysdata(server_id=user_server_id)
                         
-                        # إنشاء رابط VLESS الجديد وإرساله للآدمن
                         if admin_id:
                             fitori_link = build_vless_link(ref_email, user_uuid, user_server_id, user_port)
                             admin_msg = f"🎁 **إشعار تمديد دعوة!**\nتم تمديد المشترك `{ref_email}` وتمت زراعة كوده من جديد.\n\n🔗 **هذا هو كود المشترك للفحص:**\n`{fitori_link}`"
@@ -363,6 +360,7 @@ def register_create_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data == "create_code")
     def start_creation(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الإدخالات المعلقة
         servers = get_all_servers()
 
         if not servers:
@@ -374,12 +372,15 @@ def register_create_handlers(bot):
             s_id, s_name, s_site_id, s_status = s
             if s_status == 'active':
                 markup.add(InlineKeyboardButton(f"🖥️ {s_name}", callback_data=f"sel_srv_{s_id}"))
+                
+        markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="main_menu")) # 🔥 إضافة زر رجوع
 
         bot.edit_message_text("🌐 **في أي سيرفر تريد إنشاء المشترك؟**", chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("sel_srv_"))
     def process_server_selection(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         server_id = int(call.data.split("_")[2])
         creation_data[chat_id] = {'server_id': server_id}
 
@@ -392,13 +393,14 @@ def register_create_handlers(bot):
 
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("⏭️ تخطي كود الدعوة", callback_data="skip_referral"))
+        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
         msg = bot.send_message(chat_id, "🎁 **نظام المكافآت والدعوات:**\nإذا كان المشترك قادماً عن طريق شخص آخر، أرسل (كود دعوة) الشخص الداعي الآن ليتم مكافأته.\n\n👇 أو اضغط تخطي للاستمرار:", reply_markup=markup, parse_mode="Markdown")
         bot.register_next_step_handler(msg, check_referral_text, bot)
 
     @bot.callback_query_handler(func=lambda call: call.data == "skip_referral")
     def skip_ref(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id)
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         ask_protocol(chat_id, bot, call.message.message_id)
 
     def check_referral_text(message, bot):
@@ -418,16 +420,19 @@ def register_create_handlers(bot):
                 InlineKeyboardButton("إدخال يدوي ✍️", callback_data="rew_manual"),
                 InlineKeyboardButton("إلغاء التمديد والتخطي ⏭️", callback_data="skip_referral")
             )
+            markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
             bot.send_message(chat_id, f"✅ **كود صحيح!**\nهذا الكود يعود للمشترك: `{referrer_email}`\n\nاختر كم تريد أن تمدد صلاحيته كمكافأة للدعوة:", reply_markup=markup, parse_mode="Markdown")
         else:
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("⏭️ الاستمرار بدون مكافأة (تخطي)", callback_data="skip_referral"))
+            markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
             msg = bot.send_message(chat_id, "❌ كود الدعوة غير صحيح أو غير موجود!\nتأكد من الكود وأرسله مجدداً، أو اضغط تخطي:", reply_markup=markup)
             bot.register_next_step_handler(msg, check_referral_text, bot)
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("rew_"))
     def process_reward(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         choice = call.data.split('_')[1]
 
         if choice == "manual":
@@ -471,6 +476,7 @@ def register_create_handlers(bot):
             InlineKeyboardButton("بورت 80 🌐", callback_data="port_80"),
             InlineKeyboardButton("إدخال البورت يدوياً ✍️", callback_data="port_manual")
         )
+        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
         text = "🚪 اختر البورت:"
         if message_id:
             try: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
@@ -481,6 +487,7 @@ def register_create_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("port_"))
     def process_port(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         port_val = call.data.split('_')[1]
         if port_val == "manual":
             msg = bot.send_message(chat_id, "✍️ أرسل رقم البورت:")
@@ -502,6 +509,7 @@ def register_create_handlers(bot):
     def ask_ws(chat_id, bot, message_id=None):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("WebSocket (WS) 🌐", callback_data="net_ws"))
+        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
         text = "📡 اختر نوع الشبكة:"
         if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
         else: bot.send_message(chat_id, text, reply_markup=markup)
@@ -509,6 +517,7 @@ def register_create_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data == "net_ws")
     def process_ws(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         creation_data[chat_id]['network'] = 'ws'
         ask_uuid(chat_id, bot, call.message.message_id)
 
@@ -518,6 +527,7 @@ def register_create_handlers(bot):
             InlineKeyboardButton("ID عشوائي 🎲", callback_data="id_random"),
             InlineKeyboardButton("ID يدوي ✍️", callback_data="id_manual")
         )
+        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
         text = "🔑 اختر المعرف (UUID):"
         if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
         else: bot.send_message(chat_id, text, reply_markup=markup)
@@ -525,6 +535,7 @@ def register_create_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("id_"))
     def process_uuid(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         choice = call.data.split('_')[1]
         if choice == "random":
             creation_data[chat_id]['uuid'] = str(uuid.uuid4())
@@ -546,6 +557,7 @@ def register_create_handlers(bot):
     def ask_ips(chat_id, bot, message_id=None):
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(InlineKeyboardButton("متصل واحد 📱", callback_data="ip_1"), InlineKeyboardButton("العدد يدوي ✍️", callback_data="ip_manual"))
+        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
         text = "👥 حدد عدد الأجهزة المسموحة:"
         if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
         else: bot.send_message(chat_id, text, reply_markup=markup)
@@ -553,6 +565,7 @@ def register_create_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ip_"))
     def process_ips(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         choice = call.data.split('_')[1]
         if choice == "manual":
             msg = bot.send_message(chat_id, "✍️ أرسل عدد الأجهزة (أرقام فقط):")
@@ -580,6 +593,7 @@ def register_create_handlers(bot):
             InlineKeyboardButton("سنة", callback_data="dur_365d"),
             InlineKeyboardButton("مدة يدوية ✍️", callback_data="dur_manual")
         )
+        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
         text = "⏳ حدد مدة الكود:"
         if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
         else: bot.send_message(chat_id, text, reply_markup=markup)
@@ -587,6 +601,7 @@ def register_create_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("dur_"))
     def process_duration(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         choice = call.data.split('_')[1]
         if choice == "manual":
             msg = bot.send_message(chat_id, "✍️ أرسل المدة (مثال: 5m لدقائق، 2h لساعات، 10d لأيام، 1y لسنة):")
@@ -615,6 +630,7 @@ def register_create_handlers(bot):
             InlineKeyboardButton("بلا حدود ♾️", callback_data="quota_unlimited"),
             InlineKeyboardButton("سعة يدوية ✍️", callback_data="quota_manual")
         )
+        markup.add(InlineKeyboardButton("🔙 إلغاء والرجوع", callback_data="main_menu")) # 🔥 إضافة زر رجوع
         text = "📊 حدد سعة الاستهلاك (Quota):"
         if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
         else: bot.send_message(chat_id, text, reply_markup=markup)
@@ -622,6 +638,7 @@ def register_create_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("quota_"))
     def process_quota(call):
         chat_id = call.message.chat.id
+        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف
         choice = call.data.split('_')[1]
         if choice == "manual":
             msg = bot.send_message(chat_id, "✍️ أرسل السعة بالجيجابايت (مثال: 50):")
