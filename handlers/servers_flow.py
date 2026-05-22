@@ -13,7 +13,6 @@ def register_servers_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data == "manage_servers", is_admin=True)
     def show_servers_menu(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة لحل مشكلة الرجوع
         servers = db.get_all_servers()
         
         markup = InlineKeyboardMarkup(row_width=1)
@@ -32,16 +31,13 @@ def register_servers_handlers(bot):
     # 2. الرجوع للقائمة الرئيسية
     @bot.callback_query_handler(func=lambda call: call.data == "admin_main_menu", is_admin=True)
     def back_to_main(call):
-        chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة لحل مشكلة الرجوع
         from handlers import admin_start
-        admin_start.show_main_menu(bot, chat_id, call.message.message_id)
+        admin_start.show_main_menu(bot, call.message.chat.id, call.message.message_id)
 
     # 3. خطوات إضافة سيرفر جديد
     @bot.callback_query_handler(func=lambda call: call.data == "add_server", is_admin=True)
     def add_server_start(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         msg = bot.send_message(chat_id, "📝 **أرسل اسم السيرفر الجديد:**\n(مثال: `سيرفر ألمانيا 1`، `Alwaysdata 2`)", parse_mode="Markdown")
         bot.register_next_step_handler(msg, process_server_name, bot)
 
@@ -94,7 +90,6 @@ def register_servers_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("view_server_"), is_admin=True)
     def view_server(call):
         chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         server_id = int(call.data.split("_")[2])
         
         server = db.get_server_details(server_id)
@@ -119,8 +114,6 @@ def register_servers_handlers(bot):
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("del_server_"), is_admin=True)
     def delete_server(call):
-        chat_id = call.message.chat.id
-        bot.clear_step_handler_by_chat_id(chat_id) # 🔥 تنظيف الأوامر المعلقة
         server_id = int(call.data.split("_")[2])
         
         if server_id == 1:
