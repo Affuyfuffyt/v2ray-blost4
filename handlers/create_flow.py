@@ -22,12 +22,6 @@ from db import (
     get_all_servers, get_server_details
 )
 
-# 👇 استدعاء واجهة الباندل المحلية (Xray-core)
-try:
-    from xray_core.panel_api import PanelAPI
-except Exception:
-    PanelAPI = None
-
 # 👇 استدعاء نظام الإشعارات
 try:
     from user_notifier import notify_extension
@@ -48,50 +42,36 @@ def is_valid_uuid(val):
         return False
 
 # ==========================================
-# 🛠️ أداة جلب بيانات المشترك لإعادة الزراعة
-# ==========================================
-def get_user_info_for_replant(email):
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        db_path = os.path.join(base_dir, "database.db")
-        if not os.path.exists(db_path):
-            db_path = "database.db"
-            
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-        c.execute("SELECT uuid, server_id FROM users WHERE email=?", (email,))
-        res = c.fetchone()
-        conn.close()
-        if res:
-            return res[0], res[1]
-    except Exception as e:
-        print(f"Error fetching user info: {e}")
-    return None, 1
-
-# ==========================================
-# 🛠️ دالة الإضافة الذكية (VLESS فقط - المسار الموحد)
+# 🛠️ دالة الإضافة والزراعة المباشرة (القوية)
 # ==========================================
 def add_client_to_config(user_name, uuid_val, protocol, server_id=1, bot=None, chat_id=None):
-    """تضيف مشترك جديد إلى ملف config.json (محلي أو بعيد عبر FTP)."""
+    """تضيف مشترك جديد إلى ملف config.json بقوة وتُعيد تشغيل المحرك."""
     try:
-        # ===== السيرفر المحلي: نستخدم PanelAPI لإدارة الكونفك والريستارت =====
+        # ===== السيرفر المحلي: زراعة مباشرة في الملف (أقوى من PanelAPI) =====
         if server_id == 1:
-            if PanelAPI is None:
-                if bot and chat_id:
-                    bot.send_message(chat_id, "❌ لا يمكن تحميل وحدة PanelAPI المحلية.")
-                return False
-            api = PanelAPI()
-            ok = api.create_client(user_name, uuid_val, protocol)
-            if not ok and bot and chat_id:
-                bot.send_message(chat_id, "❌ فشل في إضافة المشترك إلى السيرفر المحلي.")
-            return ok
+            home_dir = os.path.expanduser("~")
+            config_path = f"{home_dir}/xray_core/config.json"
+            
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                
+                inbounds = config_data.setdefault("inbounds", [])
+                if inbounds:
+                    clients = inbounds[0].setdefault("settings", {}).setdefault("clients", [])
+                    # زراعة الكود إذا لم يكن موجوداً
+                    if not any(c.get("id") == uuid_val for c in clients):
+                        clients.append({"id": uuid_val, "email": user_name, "level": 0})
+                        with open(config_path, 'w', encoding='utf-8') as f:
+                            json.dump(config_data, f, indent=2, ensure_ascii=False)
+                        
+                        # ريستارت مباشر للمحرك لتفعيل الكود
+                        os.system(f"pkill -9 xray ; nohup {home_dir}/xray_core/xray run -c {config_path} > {home_dir}/xray_core/xray.log 2>&1 &")
+            return True
 
         # ===== السيرفر البعيد: نتصل عبر FTP =====
         server = get_server_details(server_id)
-        if not server:
-            if bot and chat_id:
-                bot.send_message(chat_id, f"❌ السيرفر رقم {server_id} غير موجود.")
-            return False
+        if not server: return False
 
         s_id, s_name, s_site_id, s_api, s_host, s_user, s_pass = server
         ftp_domain = s_host if s_host.startswith("ftp-") else f"ftp-{s_host}"
@@ -104,22 +84,15 @@ def add_client_to_config(user_name, uuid_val, protocol, server_id=1, bot=None, c
             config_data = json.loads(r.getvalue().decode('utf-8'))
 
             inbounds = config_data.setdefault("inbounds", [])
-            if not inbounds:
-                if bot and chat_id:
-                    bot.send_message(chat_id, "❌ السيرفر البعيد لا يحتوي على inbounds في الكونفك.")
-                return False
+            if not inbounds: return False
 
             inbound  = inbounds[0]
             settings = inbound.setdefault("settings", {})
             clients  = settings.setdefault("clients", [])
 
-            already = any(
-                c.get("id") == uuid_val or c.get("email") == user_name
-                for c in clients
-            )
+            already = any(c.get("id") == uuid_val or c.get("email") == user_name for c in clients)
             if not already:
                 clients.append({"id": uuid_val, "email": user_name, "level": 0})
-
                 w = BytesIO(json.dumps(config_data, indent=2, ensure_ascii=False).encode('utf-8'))
                 ftp.storbinary("STOR xray_core/config.json", w)
             return True
@@ -129,26 +102,35 @@ def add_client_to_config(user_name, uuid_val, protocol, server_id=1, bot=None, c
 
     except Exception as e:
         print(f"Error adding to config: {e}")
-        if bot and chat_id:
-            bot.send_message(chat_id, f"⚠️ خطأ في تعديل ملف السيرفر: {e}")
         return False
 
 # ==========================================
-# 🗑️ دالة حذف المشترك المنتهي
+# 🗑️ دالة الحذف المباشرة
 # ==========================================
 def remove_client_from_config(uuid_val, server_id=1):
-    """تحذف مشترك بناءً على الـ UUID من ملف config.json (محلي أو بعيد)."""
     try:
         # ===== السيرفر المحلي =====
         if server_id == 1:
-            if PanelAPI is None:
-                return False
-            return PanelAPI().remove_client(uuid_val)
+            home_dir = os.path.expanduser("~")
+            config_path = f"{home_dir}/xray_core/config.json"
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                
+                inbounds = config_data.setdefault("inbounds", [])
+                if inbounds:
+                    clients = inbounds[0].setdefault("settings", {}).setdefault("clients", [])
+                    new_clients = [c for c in clients if c.get("id") != uuid_val]
+                    if len(clients) != len(new_clients):
+                        inbounds[0]["settings"]["clients"] = new_clients
+                        with open(config_path, 'w', encoding='utf-8') as f:
+                            json.dump(config_data, f, indent=2, ensure_ascii=False)
+                        os.system(f"pkill -9 xray ; nohup {home_dir}/xray_core/xray run -c {config_path} > {home_dir}/xray_core/xray.log 2>&1 &")
+            return True
 
         # ===== السيرفر البعيد =====
         server = get_server_details(server_id)
-        if not server:
-            return False
+        if not server: return False
 
         s_id, s_name, s_site_id, s_api, s_host, s_user, s_pass = server
         ftp_domain = s_host if s_host.startswith("ftp-") else f"ftp-{s_host}"
@@ -204,10 +186,7 @@ def restart_alwaysdata(bot=None, chat_id=None, success_msg=None, fail_msg=None, 
             SITE_ID = server[2]
             API_KEY = server[3]
 
-        if not SITE_ID or not API_KEY:
-            if bot and chat_id:
-                bot.send_message(chat_id, "⚠️ لم يتم العثور على مفاتيح Alwaysdata.")
-            return False
+        if not SITE_ID or not API_KEY: return False
 
         url = f"https://api.alwaysdata.com/v1/site/{SITE_ID}/restart/"
         response = requests.post(url, auth=(API_KEY, ''), timeout=15)
@@ -219,13 +198,11 @@ def restart_alwaysdata(bot=None, chat_id=None, success_msg=None, fail_msg=None, 
                 bot.send_message(chat_id, f"{fail_msg}\nكود الخطأ: {response.status_code}")
         return response.status_code in [200, 201, 202, 204]
     except Exception as e:
-        if bot and chat_id:
-            bot.send_message(chat_id, "⚠️ حدث خطأ في الاتصال بمنصة Alwaysdata.")
         print(f"Restart Error: {e}")
     return False
 
 # ==========================================
-# 👁️ مراقب قاعدة البيانات (الذكي)
+# 👁️ مراقب قاعدة البيانات (الذكي وحلال المشاكل)
 # ==========================================
 def database_expiry_watchdog(bot):
     admin_id = None
@@ -241,7 +218,7 @@ def database_expiry_watchdog(bot):
 
     while True:
         try:
-            # 1. مراقبة انتهاء المشتركين (طرد الذين انتهى وقتهم المحدث فقط)
+            # 1. طرد المنتهين
             active_users = get_active_users()
             current_time = time.time()
             expired_by_server = {}
@@ -255,32 +232,53 @@ def database_expiry_watchdog(bot):
 
             if admin_id:
                 for s_id, names in expired_by_server.items():
-                    success = restart_alwaysdata(server_id=s_id)
+                    restart_alwaysdata(server_id=s_id)
                     names_str = "\n".join([f"• `{n}`" for n in names])
-                    if success:
-                        msg = f"🛑 **تنبيه الطرد التلقائي!** 🛑\n\nالمنتهين في سيرفر ({s_id}):\n{names_str}\n\n🔄 **تم سحب الصلاحيات وعمل ريستارت للسيرفر لطردهم!**"
-                    else:
-                        msg = f"⚠️ تم مسح المشتركين ({names_str}) من السيرفر ({s_id}) ولكن فشل الريستارت!"
+                    msg = f"🛑 **تنبيه الطرد التلقائي!**\nالمنتهين في سيرفر ({s_id}):\n{names_str}\n🔄 **تم سحب الصلاحيات!**"
                     bot.send_message(admin_id, msg, parse_mode="Markdown")
 
-            # 2. مراقبة المكافآت وإعادة الزراعة (Re-plant)
+            # 2. مراقبة المكافآت وإعادة الزراعة الذكية
             pending_rewards = get_all_pending_rewards()
             for ref_email, inv_email, reward_sec, c_id in pending_rewards:
                 if get_user_connection_seconds(inv_email) >= 60:
-                    # تمديد الوقت الفعلي
-                    extend_user_expiry(ref_email, reward_sec)
+                    
+                    # 🔥 الإصلاح الجذري: معالجة "السفر بالزمن" وإعادة الزراعة
+                    db_path = os.path.join(base_dir, "database.db")
+                    if not os.path.exists(db_path): db_path = "database.db"
+                    
+                    user_uuid = None
+                    user_server_id = 1
+                    try:
+                        conn = sqlite3.connect(db_path)
+                        c = conn.cursor()
+                        c.execute("SELECT uuid, server_id, expiry FROM users WHERE email=?", (ref_email,))
+                        row = c.fetchone()
+                        if row:
+                            user_uuid, user_server_id, current_expiry = row
+                            now = time.time()
+                            
+                            # إذا كان المشترك منتهي سابقاً، نبدأ وقته من الآن!
+                            if current_expiry and float(current_expiry) < now:
+                                new_expiry = now + reward_sec
+                            else:
+                                new_expiry = float(current_expiry) + reward_sec if current_expiry else now + reward_sec
+                            
+                            c.execute("UPDATE users SET expiry=?, status='active' WHERE email=?", (new_expiry, ref_email))
+                            conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        print(f"DB Replant Error: {e}")
+
+                    # إعادة الزراعة فوراً كأنه كود جديد
+                    if user_uuid:
+                        add_client_to_config(ref_email, user_uuid, "vless", user_server_id, bot, c_id)
+                        restart_alwaysdata(server_id=user_server_id)
+
                     try: extend_json_expiry(ref_email, reward_sec)
                     except: pass
                     
-                    # 🔥 إعادة الزراعة والريستارت في حال كان الكود ممسوح
-                    user_uuid, user_server_id = get_user_info_for_replant(ref_email)
-                    if user_uuid:
-                        add_client_to_config(ref_email, user_uuid, "vless", user_server_id, bot, c_id)
-                        restart_alwaysdata(bot, c_id, f"🔄 تم تحديث السيرفر ({user_server_id}) لتفعيل المكافأة للداعي!", f"⚠️ فشل الريستارت للسيرفر ({user_server_id})", user_server_id)
-
                     remove_pending_reward(inv_email)
-
-                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` وإعادة زراعة الكود بالسيرفر بنجاح! 🚀", parse_mode="Markdown")
+                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` وتمت زراعته من جديد بنجاح! 🚀", parse_mode="Markdown")
                     notify_extension(bot, ref_email, reward_sec)
         except Exception as e:
             print(f"Watchdog Error: {e}")
@@ -608,7 +606,7 @@ def register_create_handlers(bot):
         success = add_client_to_config(data['name'], data['uuid'], protocol, server_id, bot, chat_id)
 
         if not success:
-            bot.send_message(chat_id, "❌ فشلت عملية الإضافة! راجع رسائل الخطأ أعلاه.")
+            bot.send_message(chat_id, "❌ فشلت عملية الإضافة! تأكد من الملفات.")
             creation_data.pop(chat_id, None)
             return
 
@@ -621,7 +619,6 @@ def register_create_handlers(bot):
         except Exception as e:
             print(f"Error saving to SQLite DB: {e}")
 
-        # المكافآت
         new_ref_code = "REF-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
         try: assign_ref_code(data['name'], new_ref_code)
         except: pass
@@ -632,10 +629,7 @@ def register_create_handlers(bot):
             try: add_pending_reward(referrer_email, data['name'], reward_sec, chat_id)
             except: pass
 
-        # ⚠️ تمت إزالة الدالة الخطرة (auto_restart_on_expiry) لأنها كانت تمسح الكود وتلغي التمديد
-
         selected_port = data.get('port', 443)
-
         local_user = os.path.basename(os.path.expanduser("~"))
         host_domain = f"{local_user}.alwaysdata.net"
 
@@ -667,10 +661,7 @@ def register_create_handlers(bot):
             sni_str = ""
 
         encoded_path = urllib.parse.quote(fixed_path, safe='')
-
-        # توليد كود VLESS فقط
         final_link = f"vless://{data['uuid']}@{host_domain}:{selected_port}?type=ws&security={security_type}&path={encoded_path}&host={host_domain}{sni_str}#{data['name']}"
-
         quota_display = "بلا حدود ♾️" if data['quota_bytes'] == 0 else f"{data['quota_bytes'] / (1024**3):.2f} GB"
 
         srv_name = "السيرفر المحلي" if server_id == 1 else srv[1]
@@ -690,8 +681,3 @@ def register_create_handlers(bot):
         """
         bot.send_message(chat_id, summary, parse_mode="Markdown")
         creation_data.pop(chat_id, None)
-
-        time.sleep(1)
-        success_msg = f"🔄 تم الريستارت التلقائي للسيرفر ({srv_name}) بنجاح! 🚀 الكود هسه شغال."
-        fail_msg = f"⚠️ الكود انحفظ، بس فشل الريستارت التلقائي للسيرفر ({srv_name})."
-        restart_alwaysdata(bot, chat_id, success_msg, fail_msg, server_id)
