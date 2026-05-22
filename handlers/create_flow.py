@@ -42,12 +42,71 @@ def is_valid_uuid(val):
         return False
 
 # ==========================================
+# 🛠️ أداة مساعدة: توليد رابط VLESS كامل
+# ==========================================
+def build_vless_link(name, uuid_val, server_id, port):
+    fixed_path = "/xray"
+    local_user = os.path.basename(os.path.expanduser("~"))
+    host_domain = f"{local_user}.alwaysdata.net"
+
+    if server_id == 1:
+        try:
+            home_dir = os.path.expanduser("~")
+            key_file = f"{home_dir}/alwaysdata_keys.txt"
+            if os.path.exists(key_file):
+                with open(key_file, 'r') as f:
+                    lines = f.read().strip().split('\n')
+                    if len(lines) >= 3 and lines[2].strip() != "":
+                        host_domain = lines[2].strip()
+        except: pass
+    else:
+        srv = get_server_details(server_id)
+        if srv:
+            raw_host = srv[4]
+            if raw_host.startswith("ftp-"):
+                raw_host = raw_host[4:]
+            host_domain = raw_host
+
+    if port == 443:
+        security_type = "tls"
+        sni_str = f"&sni={host_domain}"
+    else:
+        security_type = "none"
+        sni_str = ""
+
+    encoded_path = urllib.parse.quote(fixed_path, safe='')
+    final_link = f"vless://{uuid_val}@{host_domain}:{port}?type=ws&security={security_type}&path={encoded_path}&host={host_domain}{sni_str}#{name}"
+    return final_link
+
+# ==========================================
+# 🛠️ أداة جلب بيانات المشترك لإعادة الزراعة
+# ==========================================
+def get_user_info_for_replant(email):
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(base_dir, "database.db")
+        if not os.path.exists(db_path):
+            db_path = "database.db"
+            
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        # جلب الـ UUID والسيرفر والبورت إذا كان موجوداً بالجدول
+        c.execute("SELECT uuid, server_id, port FROM users WHERE email=?", (email,))
+        res = c.fetchone()
+        conn.close()
+        if res:
+            return res[0], res[1], (res[2] if res[2] else 443)
+    except Exception as e:
+        print(f"Error fetching user info: {e}")
+    return None, 1, 443
+
+# ==========================================
 # 🛠️ دالة الإضافة والزراعة المباشرة (القوية)
 # ==========================================
 def add_client_to_config(user_name, uuid_val, protocol, server_id=1, bot=None, chat_id=None):
     """تضيف مشترك جديد إلى ملف config.json بقوة وتُعيد تشغيل المحرك."""
     try:
-        # ===== السيرفر المحلي: زراعة مباشرة في الملف (أقوى من PanelAPI) =====
+        # ===== السيرفر المحلي: زراعة مباشرة في الملف =====
         if server_id == 1:
             home_dir = os.path.expanduser("~")
             config_path = f"{home_dir}/xray_core/config.json"
@@ -59,13 +118,11 @@ def add_client_to_config(user_name, uuid_val, protocol, server_id=1, bot=None, c
                 inbounds = config_data.setdefault("inbounds", [])
                 if inbounds:
                     clients = inbounds[0].setdefault("settings", {}).setdefault("clients", [])
-                    # زراعة الكود إذا لم يكن موجوداً
                     if not any(c.get("id") == uuid_val for c in clients):
                         clients.append({"id": uuid_val, "email": user_name, "level": 0})
                         with open(config_path, 'w', encoding='utf-8') as f:
                             json.dump(config_data, f, indent=2, ensure_ascii=False)
                         
-                        # ريستارت مباشر للمحرك لتفعيل الكود
                         os.system(f"pkill -9 xray ; nohup {home_dir}/xray_core/xray run -c {config_path} > {home_dir}/xray_core/xray.log 2>&1 &")
             return True
 
@@ -164,7 +221,7 @@ def remove_client_from_config(uuid_val, server_id=1):
         return False
 
 # ==========================================
-# 🔄 دالة عمل ريستارت للسيرفر (مركزي عبر Alwaysdata API)
+# 🔄 دالة عمل ريستارت للسيرفر
 # ==========================================
 def restart_alwaysdata(bot=None, chat_id=None, success_msg=None, fail_msg=None, server_id=1):
     try:
@@ -191,10 +248,10 @@ def restart_alwaysdata(bot=None, chat_id=None, success_msg=None, fail_msg=None, 
         url = f"https://api.alwaysdata.com/v1/site/{SITE_ID}/restart/"
         response = requests.post(url, auth=(API_KEY, ''), timeout=15)
 
-        if bot and chat_id:
+        if bot and chat_id and success_msg:
             if response.status_code in [200, 201, 202, 204]:
                 bot.send_message(chat_id, success_msg, parse_mode="Markdown")
-            else:
+            elif fail_msg:
                 bot.send_message(chat_id, f"{fail_msg}\nكود الخطأ: {response.status_code}")
         return response.status_code in [200, 201, 202, 204]
     except Exception as e:
@@ -237,27 +294,28 @@ def database_expiry_watchdog(bot):
                     msg = f"🛑 **تنبيه الطرد التلقائي!**\nالمنتهين في سيرفر ({s_id}):\n{names_str}\n🔄 **تم سحب الصلاحيات!**"
                     bot.send_message(admin_id, msg, parse_mode="Markdown")
 
-            # 2. مراقبة المكافآت وإعادة الزراعة الذكية
+            # 2. مراقبة المكافآت وإعادة الزراعة الكاملة
             pending_rewards = get_all_pending_rewards()
             for ref_email, inv_email, reward_sec, c_id in pending_rewards:
                 if get_user_connection_seconds(inv_email) >= 60:
                     
-                    # 🔥 الإصلاح الجذري: معالجة "السفر بالزمن" وإعادة الزراعة
                     db_path = os.path.join(base_dir, "database.db")
                     if not os.path.exists(db_path): db_path = "database.db"
                     
                     user_uuid = None
                     user_server_id = 1
+                    user_port = 443
                     try:
                         conn = sqlite3.connect(db_path)
                         c = conn.cursor()
-                        c.execute("SELECT uuid, server_id, expiry FROM users WHERE email=?", (ref_email,))
+                        c.execute("SELECT uuid, server_id, expiry, port FROM users WHERE email=?", (ref_email,))
                         row = c.fetchone()
                         if row:
-                            user_uuid, user_server_id, current_expiry = row
+                            user_uuid, user_server_id, current_expiry, user_port = row
+                            if not user_port: user_port = 443
                             now = time.time()
                             
-                            # إذا كان المشترك منتهي سابقاً، نبدأ وقته من الآن!
+                            # تعديل وقت الانتهاء
                             if current_expiry and float(current_expiry) < now:
                                 new_expiry = now + reward_sec
                             else:
@@ -269,16 +327,24 @@ def database_expiry_watchdog(bot):
                     except Exception as e:
                         print(f"DB Replant Error: {e}")
 
-                    # إعادة الزراعة فوراً كأنه كود جديد
+                    # مسح الكود القديم إن وجد، ثم زراعته من جديد لضمان التفعيل التام
                     if user_uuid:
-                        add_client_to_config(ref_email, user_uuid, "vless", user_server_id, bot, c_id)
+                        remove_client_from_config(user_uuid, user_server_id)
+                        time.sleep(1)
+                        add_client_to_config(ref_email, user_uuid, "vless", user_server_id)
                         restart_alwaysdata(server_id=user_server_id)
+                        
+                        # إنشاء رابط VLESS الجديد وإرساله للآدمن
+                        if admin_id:
+                            fitori_link = build_vless_link(ref_email, user_uuid, user_server_id, user_port)
+                            admin_msg = f"🎁 **إشعار تمديد دعوة!**\nتم تمديد المشترك `{ref_email}` وتمت زراعة كوده من جديد.\n\n🔗 **هذا هو كود المشترك للفحص:**\n`{fitori_link}`"
+                            bot.send_message(admin_id, admin_msg, parse_mode="Markdown")
 
                     try: extend_json_expiry(ref_email, reward_sec)
                     except: pass
                     
                     remove_pending_reward(inv_email)
-                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` وتمت زراعته من جديد بنجاح! 🚀", parse_mode="Markdown")
+                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` وتمت زراعته وتفعيله من جديد بنجاح! 🚀", parse_mode="Markdown")
                     notify_extension(bot, ref_email, reward_sec)
         except Exception as e:
             print(f"Watchdog Error: {e}")
@@ -585,8 +651,7 @@ def register_create_handlers(bot):
         data = creation_data[chat_id]
         server_id = data.get('server_id', 1)
         protocol = "vless"
-        fixed_path = "/xray"
-        data['path'] = fixed_path
+        data['path'] = "/xray"
 
         dur_str = data['duration_str']
         try:
@@ -630,41 +695,10 @@ def register_create_handlers(bot):
             except: pass
 
         selected_port = data.get('port', 443)
-        local_user = os.path.basename(os.path.expanduser("~"))
-        host_domain = f"{local_user}.alwaysdata.net"
-
-        if server_id == 1:
-            try:
-                home_dir = os.path.expanduser("~")
-                key_file = f"{home_dir}/alwaysdata_keys.txt"
-                if os.path.exists(key_file):
-                    with open(key_file, 'r') as f:
-                        lines = f.read().strip().split('\n')
-                        if len(lines) >= 3 and lines[2].strip() != "":
-                            host_domain = lines[2].strip()
-            except: pass
-        else:
-            srv = get_server_details(server_id)
-            if srv:
-                raw_host = srv[4]
-                if raw_host.startswith("ftp-"):
-                    raw_host = raw_host[4:]
-                host_domain = raw_host
-
-        if selected_port == 443:
-            security_type = "tls"
-            sni_param = host_domain
-            sni_str = f"&sni={sni_param}"
-        else:
-            security_type = "none"
-            sni_param = ""
-            sni_str = ""
-
-        encoded_path = urllib.parse.quote(fixed_path, safe='')
-        final_link = f"vless://{data['uuid']}@{host_domain}:{selected_port}?type=ws&security={security_type}&path={encoded_path}&host={host_domain}{sni_str}#{data['name']}"
+        final_link = build_vless_link(data['name'], data['uuid'], server_id, selected_port)
         quota_display = "بلا حدود ♾️" if data['quota_bytes'] == 0 else f"{data['quota_bytes'] / (1024**3):.2f} GB"
 
-        srv_name = "السيرفر المحلي" if server_id == 1 else srv[1]
+        srv_name = "السيرفر المحلي" if server_id == 1 else "سيرفر بعيد"
         summary = f"""
 ✅ **تم إنشاء الكود وتفعيله بنجاح!**
 
