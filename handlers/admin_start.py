@@ -2,6 +2,9 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def show_main_menu(bot, chat_id, message_id=None):
+    # 🔥 الحل الجذري لمشكلة الرجوع: تنظيف أي أوامر أو إدخالات معلقة فوراً
+    bot.clear_step_handler_by_chat_id(chat_id)
+    
     # إنشاء لوحة المفاتيح الشفافة
     markup = InlineKeyboardMarkup(row_width=1)
     
