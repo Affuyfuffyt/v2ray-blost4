@@ -11,6 +11,7 @@ import os
 import urllib.parse
 import ftplib
 from io import BytesIO
+import sqlite3
 
 # 👇 استدعاء دوال الحفظ وقاعدة البيانات
 from database import save_user, extend_json_expiry
@@ -265,9 +266,41 @@ def database_expiry_watchdog(bot):
                     extend_user_expiry(ref_email, reward_sec)
                     try: extend_json_expiry(ref_email, reward_sec)
                     except: pass
+                    
+                    # 🔥 التعديل الجراحي: إضافة زراعة الكود وعمل ريستارت 🔥
+                    try:
+                        db_path = os.path.join(base_dir, "database.db")
+                        if not os.path.exists(db_path): db_path = "database.db"
+                        
+                        conn = sqlite3.connect(db_path)
+                        c = conn.cursor()
+                        c.execute("SELECT uuid, server_id, expiry FROM users WHERE email=?", (ref_email,))
+                        row = c.fetchone()
+                        
+                        if row:
+                            user_uuid, user_server_id, current_expiry = row
+                            now = time.time()
+                            
+                            # إذا الكود كان منتهي، نجدد الوقت من اللحظة الحالية
+                            if current_expiry and float(current_expiry) < now:
+                                new_expiry = now + reward_sec
+                                c.execute("UPDATE users SET expiry=?, status='active' WHERE email=?", (new_expiry, ref_email))
+                                conn.commit()
+                            
+                            # زراعة الكود من جديد
+                            add_client_to_config(ref_email, user_uuid, "vless", user_server_id, bot, c_id)
+                            
+                            # عمل ريستارت لتفعيل الكود
+                            restart_alwaysdata(bot, c_id, f"🔄 تم تحديث السيرفر لتفعيل مكافأة الدعوة للمشترك `{ref_email}`! 🚀", f"⚠️ فشل الريستارت التلقائي للسيرفر ({user_server_id}).", user_server_id)
+                            
+                        conn.close()
+                    except Exception as e:
+                        print(f"Replant Error: {e}")
+                    # 🔥 نهاية التعديل الجراحي 🔥
+
                     remove_pending_reward(inv_email)
 
-                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` بنجاح لأن المشترك الجديد اتصل بالإنترنت! 🚀", parse_mode="Markdown")
+                    bot.send_message(c_id, f"🎉 **تم تفعيل المكافأة المعلقة!**\n\nتم تمديد وقت المشترك الداعي `{ref_email}` وتمت إعادة زراعته في السيرفر بنجاح! 🚀", parse_mode="Markdown")
                     notify_extension(bot, ref_email, reward_sec)
         except Exception as e:
             pass
