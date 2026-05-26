@@ -50,8 +50,17 @@ class PanelAPI:
     # ----------------------------------------------------------------------
     def _is_xray_running(self):
         try:
-            result = subprocess.getoutput("ps aux | grep 'xray run' | grep -v grep")
-            return bool(result.strip())
+            # نبحث عن عملية xray بأي شكل كانت
+            result = subprocess.getoutput("ps aux | grep -i xray | grep -v grep")
+            if result.strip():
+                return True
+            # على Alwaysdata، نتحقق عبر محاولة الاتصال بالبورت
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            connected = sock.connect_ex(('127.0.0.1', FIXED_PORT)) == 0
+            sock.close()
+            return connected
         except:
             return False
 
@@ -167,8 +176,7 @@ class PanelAPI:
     # ----------------------------------------------------------------------
     def ensure_base_config(self):
         """يضمن وجود بوابة VLESS واحدة بإعدادات صحيحة،
-        مع الحفاظ على قائمة المشتركين (clients) كما هي.
-        يحاول تفعيل الإحصائيات، وإذا فشلت يرجع للكونفك الأساسي."""
+        مع الحفاظ على قائمة المشتركين (clients) كما هي."""
         try:
             config = self._load_config()
             if config is None:
@@ -191,40 +199,51 @@ class PanelAPI:
             log_cfg.setdefault('loglevel', 'warning')
             config['log'] = log_cfg
 
-            # --- المحاولة 1: كونفك مع إحصائيات ---
-            stats_config = self._build_stats_config(existing_clients, json.loads(json.dumps(config)))
-            self._save_config(stats_config)
-            self.restart_xray()
+            # نتحقق إذا الإحصائيات سبق وفشلت على هذا الهوست
+            stats_previously_failed = False
+            try:
+                if os.path.exists(STATS_STATUS_FILE):
+                    with open(STATS_STATUS_FILE, 'r') as f:
+                        stats_previously_failed = (f.read().strip() == 'disabled')
+            except:
+                pass
 
-            # ننتظر لحظة ونتحقق إذا xray شغال
-            time.sleep(2)
-            if self._is_xray_running():
-                self.stats_available = True
-                # نحفظ حالة نجاح الإحصائيات
-                try:
-                    with open(STATS_STATUS_FILE, 'w') as f:
-                        f.write('enabled')
-                except:
-                    pass
-                print(f"✅ تم ضبط الكونفك بنجاح — VLESS + نظام إحصائيات على البورت {FIXED_PORT}")
-            else:
-                # --- المحاولة 2: كونفك بدون إحصائيات (آمن) ---
-                print("⚠️ xray لم يشتغل مع الإحصائيات — نرجع للكونفك الأساسي بدون API")
+            if stats_previously_failed:
+                # الهوست ما يدعم بورت API — نستخدم الكونفك الأساسي مباشرة
                 base_config = self._build_base_config(existing_clients, config)
                 self._save_config(base_config)
                 self.restart_xray()
                 self.stats_available = False
-                # نحفظ حالة فشل الإحصائيات
-                try:
-                    with open(STATS_STATUS_FILE, 'w') as f:
-                        f.write('disabled')
-                except:
-                    pass
-                time.sleep(2)
+                print(f"✅ تم ضبط الكونفك الأساسي — VLESS فقط على البورت {FIXED_PORT} (الإحصائيات غير مدعومة)")
+            else:
+                # أول مرة — نجرب مع الإحصائيات
+                stats_config = self._build_stats_config(existing_clients, json.loads(json.dumps(config)))
+                self._save_config(stats_config)
+                self.restart_xray()
+
+                # ننتظر ونتحقق إذا xray شغال
+                time.sleep(5)
                 if self._is_xray_running():
-                    print(f"✅ تم ضبط الكونفك الأساسي — VLESS فقط على البورت {FIXED_PORT} (بدون إحصائيات)")
+                    self.stats_available = True
+                    try:
+                        with open(STATS_STATUS_FILE, 'w') as f:
+                            f.write('enabled')
+                    except:
+                        pass
+                    print(f"✅ تم ضبط الكونفك بنجاح — VLESS + نظام إحصائيات على البورت {FIXED_PORT}")
                 else:
-                    print("❌ xray لا يشتغل حتى بالكونفك الأساسي! تحقق من ملف error.log")
+                    # فشل — نرجع للكونفك الأساسي
+                    print("⚠️ xray لم يشتغل مع الإحصائيات — نرجع للكونفك الأساسي بدون API")
+                    base_config = self._build_base_config(existing_clients, config)
+                    self._save_config(base_config)
+                    self.restart_xray()
+                    self.stats_available = False
+                    try:
+                        with open(STATS_STATUS_FILE, 'w') as f:
+                            f.write('disabled')
+                    except:
+                        pass
+                    print(f"✅ تم ضبط الكونفك الأساسي — VLESS فقط على البورت {FIXED_PORT} (بدون إحصائيات)")
 
             # نسجل البورت النشط بملف نصي للمراقبة
             try:
