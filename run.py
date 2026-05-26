@@ -182,6 +182,171 @@ def handle_status_callbacks(call):
         bot.answer_callback_query(call.id, "🛑 تم إيقاف المراقبة الحية.")
 
 # ==========================================
+# 🔍 قسم التشخيص وسجل الأخطاء
+# ==========================================
+@bot.callback_query_handler(func=lambda call: call.data == "run_diagnostics", is_admin=True)
+def run_diagnostics(call):
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id, "🔍 جاري الفحص...")
+    
+    import json
+    import sqlite3
+    from database import JSON_DB_PATH, SQLITE_DB_PATH, load_db
+    from xray_core.panel_api import CONFIG_PATH, XRAY_BIN, STATS_API_PORT
+    
+    report = "🔍 **تقرير التشخيص الشامل**\n"
+    report += "━━━━━━━━━━━━━━━━━━\n\n"
+    
+    # 1. فحص ملف الكونفك
+    report += "**1️⃣ ملف كونفك xray:**\n"
+    try:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, 'r') as f:
+                cfg = json.load(f)
+            
+            has_stats = 'stats' in cfg
+            has_api = 'api' in cfg
+            has_policy = 'policy' in cfg
+            
+            api_inbound = False
+            vless_inbound = False
+            clients_count = 0
+            for inb in cfg.get('inbounds', []):
+                if inb.get('protocol') == 'dokodemo-door':
+                    api_inbound = True
+                if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
+                    vless_inbound = True
+                    clients_count = len(inb.get('settings', {}).get('clients', []))
+            
+            report += f"  📄 الملف: موجود\n"
+            report += f"  📊 نظام الإحصائيات (stats): {'مفعل' if has_stats else '❌ غير مفعل'}\n"
+            report += f"  🔌 بوابة API: {'مفعلة' if api_inbound else '❌ غير موجودة'}\n"
+            report += f"  📡 بوابة VLESS: {'مفعلة' if vless_inbound else '❌ غير موجودة'}\n"
+            report += f"  👥 عدد المشتركين بالكونفك: {clients_count}\n"
+            report += f"  📋 policy: {'مفعل' if has_policy else '❌ غير مفعل'}\n"
+        else:
+            report += f"  ❌ الملف غير موجود: `{CONFIG_PATH}`\n"
+    except Exception as e:
+        report += f"  ❌ خطأ: `{e}`\n"
+    
+    report += "\n"
+    
+    # 2. فحص xray API
+    report += "**2️⃣ اتصال xray API:**\n"
+    try:
+        cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT}"
+        result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8').strip()
+        if result:
+            stats = json.loads(result)
+            stat_list = stats.get('stat', [])
+            user_stats = [s for s in stat_list if s.get('name', '').startswith('user>>>')]
+            report += f"  الاتصال: ناجح\n"
+            report += f"  📊 إجمالي الإحصائيات: {len(stat_list)}\n"
+            report += f"  👤 إحصائيات المشتركين: {len(user_stats)}\n"
+            if user_stats:
+                for s in user_stats[:6]:
+                    name = s.get('name', '')
+                    val = int(s.get('value', 0))
+                    parts = name.split('>>>')
+                    email = parts[1] if len(parts) > 1 else '?'
+                    direction = parts[3] if len(parts) > 3 else '?'
+                    report += f"  └ `{email}` ({direction}): {val/1024:.1f} KB\n"
+                if len(user_stats) > 6:
+                    report += f"  └ ... و {len(user_stats)-6} إحصائية أخرى\n"
+            else:
+                report += "  ⚠️ لا توجد بيانات استهلاك (ربما لا يوجد مشتركين متصلين)\n"
+        else:
+            report += "  ⚠️ الاتصال ناجح لكن لا توجد بيانات\n"
+    except subprocess.CalledProcessError as e:
+        err_msg = e.output.decode('utf-8', errors='ignore') if e.output else str(e)
+        report += f"  ❌ فشل الاتصال:\n  `{err_msg[:200]}`\n"
+    except Exception as e:
+        report += f"  ❌ خطأ: `{str(e)[:200]}`\n"
+    
+    report += "\n"
+    
+    # 3. فحص قاعدة البيانات JSON
+    report += "**3️⃣ قاعدة بيانات JSON:**\n"
+    try:
+        db = load_db()
+        active = sum(1 for d in db.values() if d.get('is_active', True))
+        with_usage = sum(1 for d in db.values() if d.get('used_bytes', 0) > 0)
+        report += f"  📄 المسار: `{JSON_DB_PATH}`\n"
+        report += f"  👥 إجمالي المشتركين: {len(db)}\n"
+        report += f"  🟢 النشطين: {active}\n"
+        report += f"  📊 لديهم استهلاك: {with_usage}\n"
+        if db:
+            for email, data in list(db.items())[:3]:
+                used = data.get('used_bytes', 0)
+                used_str = f"{used/1024/1024:.2f} MB" if used > 0 else "0"
+                report += f"  └ `{email}`: {used_str}\n"
+    except Exception as e:
+        report += f"  ❌ خطأ: `{e}`\n"
+    
+    report += "\n"
+    
+    # 4. فحص قاعدة بيانات SQLite
+    report += "**4️⃣ قاعدة بيانات SQLite:**\n"
+    try:
+        if os.path.exists(SQLITE_DB_PATH):
+            conn = sqlite3.connect(SQLITE_DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM users WHERE status='active'")
+            active_count = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM users WHERE total_connection_seconds > 0")
+            with_time = c.fetchone()[0]
+            conn.close()
+            report += f"  📄 المسار: `{SQLITE_DB_PATH}`\n"
+            report += f"  🟢 النشطين: {active_count}\n"
+            report += f"  ⏱️ لديهم وقت اتصال: {with_time}\n"
+        else:
+            report += f"  ❌ الملف غير موجود: `{SQLITE_DB_PATH}`\n"
+    except Exception as e:
+        report += f"  ❌ خطأ: `{e}`\n"
+    
+    report += "\n"
+    
+    # 5. فحص عملية xray
+    report += "**5️⃣ عملية xray:**\n"
+    try:
+        ps = subprocess.getoutput("ps aux | grep xray | grep -v grep")
+        if ps.strip():
+            report += "  🟢 xray يعمل\n"
+        else:
+            report += "  🔴 xray غير شغال!\n"
+    except:
+        report += "  ⚠️ تعذر الفحص\n"
+    
+    report += "\n"
+    
+    # 6. فحص سجل الأخطاء
+    report += "**6️⃣ آخر الأخطاء:**\n"
+    error_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monitor_error.log')
+    try:
+        if os.path.exists(error_log) and os.path.getsize(error_log) > 0:
+            with open(error_log, 'r') as f:
+                lines = f.readlines()
+                last_errors = lines[-5:]
+                for line in last_errors:
+                    report += f"  `{line.strip()}`\n"
+        else:
+            report += "  لا توجد أخطاء مسجلة\n"
+    except:
+        report += "  ⚠️ تعذرت القراءة\n"
+    
+    report += "\n━━━━━━━━━━━━━━━━━━\n"
+    report += f"⏱️ _وقت الفحص: {time.strftime('%Y-%m-%d %H:%M:%S')}_"
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔄 إعادة الفحص", callback_data="run_diagnostics"))
+    markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
+    
+    try:
+        bot.edit_message_text(report, chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    except:
+        bot.send_message(chat_id, report, reply_markup=markup, parse_mode="Markdown")
+
+# ==========================================
 # 4. تشغيل النظام بالكامل
 # ==========================================
 if __name__ == "__main__":
