@@ -5,7 +5,7 @@ import os
 
 # 🔥 الحل الجذري: تحديد المسارات ديناميكياً لتجنب تضارب الأسماء 🔥
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-API_SERVER = '127.0.0.1:10086'
+API_SERVER = '127.0.0.1:10085'
 # اكتشاف مسار المحرك تلقائياً في أي حساب
 XRAY_BIN = os.path.expanduser('~/xray_core/xray')
 # حفظ ملف الإحصائيات داخل مجلد البوت الحالي مهما كان اسمه
