@@ -19,7 +19,7 @@ from db import (
     add_user, get_active_users, set_user_expired, get_user_by_ref_code,
     extend_user_expiry, assign_ref_code, add_pending_reward,
     get_all_pending_rewards, remove_pending_reward, get_user_connection_seconds,
-    get_all_servers, get_server_details
+    get_all_servers, get_server_details, SQLITE_DB_PATH
 )
 
 # 👇 استدعاء واجهة الباندل المحلية (Xray-core)
@@ -269,12 +269,9 @@ def database_expiry_watchdog(bot):
                     
                     # 🔥 التعديل الجراحي: إضافة زراعة الكود من جديد وعمل ريستارت 🔥
                     try:
-                        db_path = os.path.join(base_dir, "database.db")
-                        if not os.path.exists(db_path): db_path = "database.db"
-                        
-                        conn = sqlite3.connect(db_path)
+                        conn = sqlite3.connect(SQLITE_DB_PATH)
                         c = conn.cursor()
-                        c.execute("SELECT uuid, server_id, expiry FROM users WHERE email=?", (ref_email,))
+                        c.execute("SELECT uuid, server_id, expiry_date FROM users WHERE email=?", (ref_email,))
                         row = c.fetchone()
                         
                         if row:
@@ -284,7 +281,7 @@ def database_expiry_watchdog(bot):
                             # تصحيح المشكلة: إذا الكود كان منتهي قبل المكافأة، نجدد الوقت من اللحظة الحالية!
                             if current_expiry and float(current_expiry) < now:
                                 new_expiry = now + reward_sec
-                                c.execute("UPDATE users SET expiry=?, status='active' WHERE email=?", (new_expiry, ref_email))
+                                c.execute("UPDATE users SET expiry_date=?, status='active' WHERE email=?", (str(new_expiry), ref_email))
                                 conn.commit()
                             
                             # 1. زراعة الكود من جديد في ملف الكونفك
