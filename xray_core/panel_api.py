@@ -18,6 +18,9 @@ FIXED_PATH     = "/xray"
 FIXED_LISTEN   = "0.0.0.0"
 STATS_API_PORT = 10085
 
+# ملف حالة نظام الإحصائيات
+STATS_STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.stats_enabled')
+
 
 class PanelAPI:
     def __init__(self):
@@ -25,6 +28,7 @@ class PanelAPI:
         # مفاتيح Alwaysdata API (لإعادة تشغيل الموقع بعد التعديل)
         self.api_key = os.getenv('AD_API_KEY')
         self.site_id = os.getenv('AD_SITE_ID')
+        self.stats_available = False
         # نضمن أن ملف الكونفك بالشكل الصحيح فور تشغيل البوت — بدون مسح المشتركين
         self.ensure_base_config()
 
@@ -42,11 +46,129 @@ class PanelAPI:
             json.dump(config, f, indent=2, ensure_ascii=False)
 
     # ----------------------------------------------------------------------
+    # 🔍 فحص إذا xray شغال
+    # ----------------------------------------------------------------------
+    def _is_xray_running(self):
+        try:
+            result = subprocess.getoutput("ps aux | grep 'xray run' | grep -v grep")
+            return bool(result.strip())
+        except:
+            return False
+
+    # ----------------------------------------------------------------------
+    # 🛠️ بناء كونفك VLESS أساسي (بدون إحصائيات)
+    # ----------------------------------------------------------------------
+    def _build_base_config(self, existing_clients, config):
+        vless_inbound = {
+            "port": FIXED_PORT,
+            "listen": FIXED_LISTEN,
+            "protocol": FIXED_PROTOCOL,
+            "settings": {
+                "clients": existing_clients,
+                "decryption": "none"
+            },
+            "streamSettings": {
+                "network": FIXED_NETWORK,
+                "wsSettings": {
+                    "path": FIXED_PATH
+                }
+            },
+            "tag": "vless-in"
+        }
+
+        config['inbounds'] = [vless_inbound]
+
+        # إزالة إعدادات الإحصائيات
+        config.pop('stats', None)
+        config.pop('api', None)
+        config.pop('policy', None)
+
+        # إزالة قاعدة توجيه API من الراوتينق
+        routing = config.get('routing', {})
+        rules = routing.get('rules', [])
+        rules = [r for r in rules if r.get('outboundTag') != 'api']
+        routing['rules'] = rules
+        config['routing'] = routing
+
+        # نتأكد من وجود outbound افتراضي
+        if not config.get('outbounds'):
+            config['outbounds'] = [{"protocol": "freedom", "tag": "freedom"}]
+
+        return config
+
+    # ----------------------------------------------------------------------
+    # 📊 بناء كونفك مع نظام الإحصائيات
+    # ----------------------------------------------------------------------
+    def _build_stats_config(self, existing_clients, config):
+        vless_inbound = {
+            "port": FIXED_PORT,
+            "listen": FIXED_LISTEN,
+            "protocol": FIXED_PROTOCOL,
+            "settings": {
+                "clients": existing_clients,
+                "decryption": "none"
+            },
+            "streamSettings": {
+                "network": FIXED_NETWORK,
+                "wsSettings": {
+                    "path": FIXED_PATH
+                }
+            },
+            "tag": "vless-in"
+        }
+
+        api_inbound = {
+            "listen": "127.0.0.1",
+            "port": STATS_API_PORT,
+            "protocol": "dokodemo-door",
+            "settings": {"address": "127.0.0.1"},
+            "tag": "api"
+        }
+
+        config['inbounds'] = [api_inbound, vless_inbound]
+
+        # تفعيل نظام الإحصائيات لكل مشترك
+        config['stats'] = {}
+        config['api'] = {
+            "tag": "api",
+            "services": ["StatsService"]
+        }
+        config['policy'] = {
+            "levels": {
+                "0": {
+                    "statsUserUplink": True,
+                    "statsUserDownlink": True
+                }
+            },
+            "system": {
+                "statsInboundUplink": True,
+                "statsInboundDownlink": True
+            }
+        }
+
+        # نتأكد من وجود outbound افتراضي
+        if not config.get('outbounds'):
+            config['outbounds'] = [{"protocol": "freedom", "tag": "freedom"}]
+
+        # إضافة قاعدة توجيه API (لازم تكون أول قاعدة)
+        routing = config.get('routing', {})
+        rules = routing.get('rules', [])
+        api_rule = {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
+        has_api_rule = any(r.get('outboundTag') == 'api' for r in rules)
+        if not has_api_rule:
+            rules.insert(0, api_rule)
+        routing['rules'] = rules
+        config['routing'] = routing
+
+        return config
+
+    # ----------------------------------------------------------------------
     # 🛠️ ضبط الكونفك الأساسي بدون المساس بالمشتركين الموجودين
     # ----------------------------------------------------------------------
     def ensure_base_config(self):
         """يضمن وجود بوابة VLESS واحدة بإعدادات صحيحة،
-        مع الحفاظ على قائمة المشتركين (clients) كما هي."""
+        مع الحفاظ على قائمة المشتركين (clients) كما هي.
+        يحاول تفعيل الإحصائيات، وإذا فشلت يرجع للكونفك الأساسي."""
         try:
             config = self._load_config()
             if config is None:
@@ -62,75 +184,47 @@ class PanelAPI:
                         existing_clients = settings.get('clients') or []
                         break
 
-            # نعيد بناء البوابة (VLESS + WS + Path /xray) + بوابة API للإحصائيات
-            vless_inbound = {
-                "port": FIXED_PORT,
-                "listen": FIXED_LISTEN,
-                "protocol": FIXED_PROTOCOL,
-                "settings": {
-                    "clients": existing_clients,
-                    "decryption": "none"
-                },
-                "streamSettings": {
-                    "network": FIXED_NETWORK,
-                    "wsSettings": {
-                        "path": FIXED_PATH
-                    }
-                },
-                "tag": "vless-in"
-            }
-
-            api_inbound = {
-                "listen": "127.0.0.1",
-                "port": STATS_API_PORT,
-                "protocol": "dokodemo-door",
-                "settings": {"address": "127.0.0.1"},
-                "tag": "api"
-            }
-
-            config['inbounds'] = [api_inbound, vless_inbound]
-
-            # تفعيل نظام الإحصائيات لكل مشترك
-            config['stats'] = {}
-            config['api'] = {
-                "tag": "api",
-                "services": ["StatsService"]
-            }
-            config['policy'] = {
-                "levels": {
-                    "0": {
-                        "statsUserUplink": True,
-                        "statsUserDownlink": True
-                    }
-                },
-                "system": {
-                    "statsInboundUplink": True,
-                    "statsInboundDownlink": True
-                }
-            }
-
-            # نتأكد من وجود outbound افتراضي
-            if not config.get('outbounds'):
-                config['outbounds'] = [{"protocol": "freedom", "tag": "freedom"}]
-
-            # إضافة قاعدة توجيه API (لازم تكون أول قاعدة)
-            routing = config.get('routing', {})
-            rules = routing.get('rules', [])
-            api_rule = {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
-            has_api_rule = any(r.get('outboundTag') == 'api' for r in rules)
-            if not has_api_rule:
-                rules.insert(0, api_rule)
-            routing['rules'] = rules
-            config['routing'] = routing
-
-            # نتأكد من إعدادات اللوك (نحافظ على القيم الحالية إن وُجدت)
+            # نتأكد من إعدادات اللوق
             log_cfg = config.get('log') or {}
             log_cfg.setdefault('access', 'access.log')
             log_cfg.setdefault('error', 'error.log')
             log_cfg.setdefault('loglevel', 'warning')
             config['log'] = log_cfg
 
-            self._save_config(config)
+            # --- المحاولة 1: كونفك مع إحصائيات ---
+            stats_config = self._build_stats_config(existing_clients, json.loads(json.dumps(config)))
+            self._save_config(stats_config)
+            self.restart_xray()
+
+            # ننتظر لحظة ونتحقق إذا xray شغال
+            time.sleep(2)
+            if self._is_xray_running():
+                self.stats_available = True
+                # نحفظ حالة نجاح الإحصائيات
+                try:
+                    with open(STATS_STATUS_FILE, 'w') as f:
+                        f.write('enabled')
+                except:
+                    pass
+                print(f"✅ تم ضبط الكونفك بنجاح — VLESS + نظام إحصائيات على البورت {FIXED_PORT}")
+            else:
+                # --- المحاولة 2: كونفك بدون إحصائيات (آمن) ---
+                print("⚠️ xray لم يشتغل مع الإحصائيات — نرجع للكونفك الأساسي بدون API")
+                base_config = self._build_base_config(existing_clients, config)
+                self._save_config(base_config)
+                self.restart_xray()
+                self.stats_available = False
+                # نحفظ حالة فشل الإحصائيات
+                try:
+                    with open(STATS_STATUS_FILE, 'w') as f:
+                        f.write('disabled')
+                except:
+                    pass
+                time.sleep(2)
+                if self._is_xray_running():
+                    print(f"✅ تم ضبط الكونفك الأساسي — VLESS فقط على البورت {FIXED_PORT} (بدون إحصائيات)")
+                else:
+                    print("❌ xray لا يشتغل حتى بالكونفك الأساسي! تحقق من ملف error.log")
 
             # نسجل البورت النشط بملف نصي للمراقبة
             try:
@@ -139,8 +233,6 @@ class PanelAPI:
             except Exception:
                 pass
 
-            print(f"✅ تم ضبط ملف الكونفك بنجاح — VLESS فقط على البورت {FIXED_PORT}")
-            self.restart_xray()
         except Exception as e:
             print(f"Error ensuring base config: {e}")
 
@@ -240,6 +332,8 @@ class PanelAPI:
 
     def get_all_clients_traffic(self, reset=True):
         """يرجع قاموس بالترافيك لكل المشتركين. مع reset=True يصفر العدادات بعد القراءة."""
+        if not self.stats_available:
+            return {}
         try:
             reset_flag = "-reset=true" if reset else ""
             cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT} {reset_flag}"
@@ -260,6 +354,7 @@ class PanelAPI:
             return traffic
         except subprocess.CalledProcessError as e:
             print(f"⚠️ xray API خطأ: {e.output.decode('utf-8', errors='ignore') if e.output else str(e)}")
+            self.stats_available = False
             return {}
         except Exception as e:
             print(f"⚠️ خطأ في جلب الترافيك: {e}")
