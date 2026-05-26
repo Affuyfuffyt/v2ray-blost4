@@ -43,12 +43,36 @@ live_monitors = {}
 
 def get_server_status_text():
     try:
-        cpu_usage = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'")
-        cpu_usage = float(cpu_usage) if cpu_usage else 0.0
+        # قراءة CPU من /proc/stat (أخف بكثير من top -bn1)
+        try:
+            with open('/proc/stat', 'r') as f:
+                line = f.readline()
+            parts = line.split()
+            idle = int(parts[4])
+            total = sum(int(p) for p in parts[1:])
+            if not hasattr(get_server_status_text, '_prev'):
+                get_server_status_text._prev = (idle, total)
+            prev_idle, prev_total = get_server_status_text._prev
+            diff_idle = idle - prev_idle
+            diff_total = total - prev_total
+            cpu_usage = (1.0 - diff_idle / diff_total) * 100 if diff_total > 0 else 0.0
+            get_server_status_text._prev = (idle, total)
+        except:
+            cpu_usage = 0.0
         
-        ram_total = int(subprocess.getoutput("free -m | grep Mem | awk '{print $2}'"))
-        ram_used = int(subprocess.getoutput("free -m | grep Mem | awk '{print $3}'"))
-        ram_percent = int((ram_used / ram_total) * 100) if ram_total > 0 else 0
+        # قراءة RAM من /proc/meminfo (أخف من free -m)
+        try:
+            meminfo = {}
+            with open('/proc/meminfo', 'r') as f:
+                for line in f:
+                    parts = line.split()
+                    meminfo[parts[0].rstrip(':')] = int(parts[1])
+            ram_total = meminfo.get('MemTotal', 0) // 1024
+            ram_available = meminfo.get('MemAvailable', 0) // 1024
+            ram_used = ram_total - ram_available
+            ram_percent = int((ram_used / ram_total) * 100) if ram_total > 0 else 0
+        except:
+            ram_total = ram_used = ram_percent = 0
         
         disk_total = subprocess.getoutput("df -h / | tail -1 | awk '{print $2}'")
         disk_used = subprocess.getoutput("df -h / | tail -1 | awk '{print $3}'")
