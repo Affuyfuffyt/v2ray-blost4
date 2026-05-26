@@ -63,22 +63,9 @@ class PanelAPI:
         return False
 
     # ----------------------------------------------------------------------
-    # 🔍 فحص إذا Stats API شغال (عبر بورت 10085)
+    # 🛠️ بناء كونفك VLESS فقط (بدون بورتات إضافية)
     # ----------------------------------------------------------------------
-    def _is_stats_port_open(self):
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(('127.0.0.1', STATS_API_PORT))
-            sock.close()
-            return result == 0
-        except:
-            return False
-
-    # ----------------------------------------------------------------------
-    # 🛠️ بناء كونفك VLESS مع نظام الإحصائيات (دائماً)
-    # ----------------------------------------------------------------------
-    def _build_full_config(self, existing_clients, config):
+    def _build_clean_config(self, existing_clients, config):
         vless_inbound = {
             "port": FIXED_PORT,
             "listen": FIXED_LISTEN,
@@ -96,50 +83,27 @@ class PanelAPI:
             "tag": "vless-in"
         }
 
-        api_inbound = {
-            "listen": "127.0.0.1",
-            "port": STATS_API_PORT,
-            "protocol": "dokodemo-door",
-            "settings": {"address": "127.0.0.1"},
-            "tag": "api"
-        }
+        config['inbounds'] = [vless_inbound]
 
-        config['inbounds'] = [api_inbound, vless_inbound]
+        # إزالة كل ما يتعلق بالإحصائيات (يحتاج بورت إضافي)
+        config.pop('stats', None)
+        config.pop('api', None)
+        config.pop('policy', None)
 
-        config['stats'] = {}
-        config['api'] = {
-            "tag": "api",
-            "services": ["StatsService"]
-        }
-        config['policy'] = {
-            "levels": {
-                "0": {
-                    "statsUserUplink": True,
-                    "statsUserDownlink": True
-                }
-            },
-            "system": {
-                "statsInboundUplink": True,
-                "statsInboundDownlink": True
-            }
-        }
+        # إزالة قاعدة توجيه API
+        routing = config.get('routing', {})
+        rules = routing.get('rules', [])
+        rules = [r for r in rules if r.get('outboundTag') != 'api']
+        routing['rules'] = rules
+        config['routing'] = routing
 
         if not config.get('outbounds'):
             config['outbounds'] = [{"protocol": "freedom", "tag": "freedom"}]
 
-        routing = config.get('routing', {})
-        rules = routing.get('rules', [])
-        api_rule = {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
-        has_api_rule = any(r.get('outboundTag') == 'api' for r in rules)
-        if not has_api_rule:
-            rules.insert(0, api_rule)
-        routing['rules'] = rules
-        config['routing'] = routing
-
         return config
 
     # ----------------------------------------------------------------------
-    # 🛠️ ضبط الكونفك — دائماً مع نظام الإحصائيات
+    # 🛠️ ضبط الكونفك — VLESS فقط على بورت 8100
     # ----------------------------------------------------------------------
     def ensure_base_config(self):
         try:
@@ -163,44 +127,35 @@ class PanelAPI:
             log_cfg.setdefault('loglevel', 'warning')
             config['log'] = log_cfg
 
-            # نتحقق إذا الكونفك الحالي سليم (فيه stats + VLESS)
-            has_stats = 'stats' in config
-            has_api = 'api' in config
-            has_vless = any(
-                inb.get('protocol') in ('vless', 'vmess', 'trojan')
-                for inb in config.get('inbounds', [])
-            )
-            has_api_inbound = any(
-                inb.get('protocol') == 'dokodemo-door'
-                for inb in config.get('inbounds', [])
-            )
+            # نتحقق إذا الكونفك سليم (VLESS فقط، بدون dokodemo-door)
+            has_vless = False
+            has_bad_inbound = False
+            for inb in config.get('inbounds', []):
+                if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
+                    has_vless = True
+                    # نتحقق إن البورت والإعدادات صحيحة
+                    if inb.get('port') != FIXED_PORT:
+                        has_bad_inbound = True
+                if inb.get('protocol') == 'dokodemo-door':
+                    has_bad_inbound = True  # لازم نشيله — يمنع xray من التشغيل
 
-            if has_stats and has_api and has_vless and has_api_inbound:
-                # الكونفك سليم — ما نحتاج نعدل ولا نعيد تشغيل
-                print(f"✅ الكونفك سليم — VLESS + إحصائيات على البورت {FIXED_PORT}")
-                # نتحقق بس إذا Stats API شغال
-                if self._is_stats_port_open():
-                    self.stats_available = True
-                    print(f"📊 Stats API شغال على بورت {STATS_API_PORT}")
-                else:
-                    self.stats_available = False
-                    print(f"⚠️ Stats API مو شغال على بورت {STATS_API_PORT} — يحتاج ريستارت xray")
+            # نتحقق إذا فيه أقسام إحصائيات (لازم نشيلها)
+            has_stats_sections = 'stats' in config or 'api' in config
+
+            if has_vless and not has_bad_inbound and not has_stats_sections:
+                # الكونفك سليم — ما نعدل شي
+                print(f"✅ الكونفك سليم — VLESS على البورت {FIXED_PORT}")
+                # نتحقق إذا Stats API شغال (لو المستخدم على VPS)
+                self._check_stats()
                 return
 
-            # الكونفك يحتاج تعديل — نضيف نظام الإحصائيات
-            print("🔧 جاري تحديث الكونفك مع نظام الإحصائيات...")
-            full_config = self._build_full_config(existing_clients, config)
-            self._save_config(full_config)
+            # الكونفك يحتاج تنظيف
+            print("🔧 جاري تنظيف الكونفك (إزالة بورتات إضافية)...")
+            clean_config = self._build_clean_config(existing_clients, config)
+            self._save_config(clean_config)
             self.restart_xray()
-
-            # ننتظر حتى xray يبدأ
-            time.sleep(3)
-            if self._is_stats_port_open():
-                self.stats_available = True
-                print(f"✅ تم ضبط الكونفك بنجاح — VLESS + إحصائيات على البورت {FIXED_PORT}")
-            else:
-                self.stats_available = False
-                print(f"⚠️ تم حفظ الكونفك مع الإحصائيات — بورت {STATS_API_PORT} يحتاج وقت أكثر أو ريستارت يدوي")
+            self.stats_available = False
+            print(f"✅ تم ضبط الكونفك — VLESS فقط على البورت {FIXED_PORT}")
 
             try:
                 with open(f'{HOME_DIR}/active_port.txt', 'w') as f:
@@ -210,6 +165,23 @@ class PanelAPI:
 
         except Exception as e:
             print(f"Error ensuring base config: {e}")
+
+    # ----------------------------------------------------------------------
+    # 📊 فحص إذا Stats API متاح (للسيرفرات اللي تدعم بورت إضافي)
+    # ----------------------------------------------------------------------
+    def _check_stats(self):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('127.0.0.1', STATS_API_PORT))
+            sock.close()
+            if result == 0:
+                self.stats_available = True
+                print(f"📊 Stats API شغال على بورت {STATS_API_PORT}")
+            else:
+                self.stats_available = False
+        except:
+            self.stats_available = False
 
     # ----------------------------------------------------------------------
     # 👤 إضافة مشترك (الزراعة)
@@ -301,12 +273,7 @@ class PanelAPI:
 
     def get_all_clients_traffic(self, reset=True):
         if not self.stats_available:
-            # نحاول نتحقق مرة ثانية — ممكن صار شغال بعد ريستارت
-            if self._is_stats_port_open():
-                self.stats_available = True
-                print("📊 Stats API رجع شغال!")
-            else:
-                return {}
+            return {}
         try:
             reset_flag = "-reset=true" if reset else ""
             cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT} {reset_flag}"
@@ -334,31 +301,28 @@ class PanelAPI:
             return {}
 
     # ----------------------------------------------------------------------
-    # 🔍 تشخيص تفصيلي لنظام الإحصائيات
+    # 🔍 تشخيص تفصيلي
     # ----------------------------------------------------------------------
     def run_stats_diagnostic(self):
-        """يرجع تقرير تفصيلي عن سبب عدم عمل نظام الإحصائيات"""
         report = ""
 
-        # 1. فحص ملف xray
+        # 1. ملف xray
         report += "**1️⃣ ملف xray:**\n"
         if os.path.exists(XRAY_BIN):
             is_exec = os.access(XRAY_BIN, os.X_OK)
             report += f"  📄 المسار: `{XRAY_BIN}`\n"
-            report += f"  ✅ موجود\n"
             report += f"  {'✅' if is_exec else '❌'} قابل للتنفيذ: {'نعم' if is_exec else 'لا'}\n"
             try:
                 ver = subprocess.getoutput(f"{XRAY_BIN} version 2>&1")
                 first_line = ver.strip().split('\n')[0] if ver.strip() else '?'
                 report += f"  📋 النسخة: `{first_line}`\n"
             except:
-                report += "  ⚠️ تعذر قراءة النسخة\n"
+                pass
         else:
             report += f"  ❌ غير موجود: `{XRAY_BIN}`\n"
-
         report += "\n"
 
-        # 2. فحص ملف الكونفك بالتفصيل
+        # 2. ملف الكونفك
         report += "**2️⃣ ملف كونفك xray:**\n"
         try:
             if os.path.exists(CONFIG_PATH):
@@ -367,47 +331,35 @@ class PanelAPI:
 
                 has_stats = 'stats' in cfg
                 has_api = 'api' in cfg
-                has_policy = 'policy' in cfg
 
-                api_inbound = False
-                api_port = None
                 vless_inbound = False
                 vless_port = None
+                dokodemo = False
                 clients_count = 0
                 for inb in cfg.get('inbounds', []):
                     if inb.get('protocol') == 'dokodemo-door':
-                        api_inbound = True
-                        api_port = inb.get('port')
+                        dokodemo = True
                     if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
                         vless_inbound = True
                         vless_port = inb.get('port')
                         clients_count = len(inb.get('settings', {}).get('clients', []))
 
                 report += f"  📄 المسار: `{CONFIG_PATH}`\n"
-                report += f"  📊 stats: {'✅ مفعل' if has_stats else '❌ غير مفعل ← السبب الرئيسي!'}\n"
-                report += f"  🔌 api: {'✅ مفعلة' if has_api else '❌ غير موجودة ← السبب الرئيسي!'}\n"
-                report += f"  📋 policy: {'✅ مفعل' if has_policy else '❌ غير مفعل ← السبب الرئيسي!'}\n"
-                report += f"  🚪 بوابة API (dokodemo): {'✅ بورت ' + str(api_port) if api_inbound else '❌ غير موجودة!'}\n"
                 report += f"  📡 بوابة VLESS: {'✅ بورت ' + str(vless_port) if vless_inbound else '❌ غير موجودة!'}\n"
-                report += f"  👥 المشتركين بالكونفك: {clients_count}\n"
-
-                # فحص routing
-                routing = cfg.get('routing', {})
-                rules = routing.get('rules', [])
-                has_api_rule = any(r.get('outboundTag') == 'api' for r in rules)
-                report += f"  🔀 قاعدة routing API: {'✅ موجودة' if has_api_rule else '❌ غير موجودة!'}\n"
-
-                if not (has_stats and has_api and has_policy and api_inbound):
-                    report += "\n  💡 **الحل:** الكونفك ناقص أقسام الإحصائيات.\n"
-                    report += "  اضغط 'إصلاح الإحصائيات' بالأسفل.\n"
+                report += f"  👥 المشتركين: {clients_count}\n"
+                if dokodemo:
+                    report += f"  ⚠️ بوابة dokodemo-door موجودة — تمنع xray من التشغيل!\n"
+                if has_stats or has_api:
+                    report += f"  ⚠️ أقسام stats/api موجودة — تحتاج بورت إضافي!\n"
+                if not dokodemo and not has_stats and not has_api:
+                    report += f"  ✅ الكونفك نظيف (بدون بورتات إضافية)\n"
             else:
                 report += f"  ❌ غير موجود: `{CONFIG_PATH}`\n"
         except Exception as e:
-            report += f"  ❌ خطأ بقراءة الكونفك: `{e}`\n"
-
+            report += f"  ❌ خطأ: `{e}`\n"
         report += "\n"
 
-        # 3. فحص عملية xray
+        # 3. عملية xray
         report += "**3️⃣ عملية xray:**\n"
         try:
             ps = subprocess.getoutput("ps aux 2>/dev/null | grep '[x]ray'")
@@ -422,97 +374,59 @@ class PanelAPI:
         except:
             report += "  ⚠️ تعذر فحص العمليات\n"
 
-        # فحص البورتات
         vless_open = self._is_xray_running()
-        stats_open = self._is_stats_port_open()
         report += f"  🚪 بورت {FIXED_PORT} (VLESS): {'✅ مفتوح' if vless_open else '❌ مغلق'}\n"
-        report += f"  🚪 بورت {STATS_API_PORT} (Stats): {'✅ مفتوح' if stats_open else '❌ مغلق'}\n"
-
-        if vless_open and not stats_open:
-            report += "  💡 xray شغال بس بدون نظام إحصائيات — الكونفك يحتاج تحديث\n"
-
         report += "\n"
 
-        # 4. فحص Stats API مباشرة
-        report += "**4️⃣ فحص Stats API:**\n"
-        report += f"  📊 stats\\_available: `{self.stats_available}`\n"
-        try:
-            cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT}"
-            result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8').strip()
-            if result:
-                stats = json.loads(result)
-                stat_list = stats.get('stat', [])
-                user_stats = [s for s in stat_list if s.get('name', '').startswith('user>>>')]
-                report += f"  ✅ الاتصال ناجح!\n"
-                report += f"  📊 إجمالي الإحصائيات: {len(stat_list)}\n"
-                report += f"  👤 إحصائيات مشتركين: {len(user_stats)}\n"
-                for s in user_stats[:4]:
-                    name = s.get('name', '')
-                    val = int(s.get('value', 0))
-                    parts = name.split('>>>')
-                    email = parts[1] if len(parts) > 1 else '?'
-                    direction = parts[3] if len(parts) > 3 else '?'
-                    report += f"  └ `{email}` ({direction}): {val/1024:.1f} KB\n"
-            else:
-                report += "  ⚠️ اتصال ناجح لكن لا توجد بيانات\n"
-        except subprocess.CalledProcessError as e:
-            err = e.output.decode('utf-8', errors='ignore') if e.output else str(e)
-            report += f"  ❌ فشل:\n  `{err[:300]}`\n"
-        except Exception as e:
-            report += f"  ❌ خطأ: `{str(e)[:200]}`\n"
-
+        # 4. نظام الإحصائيات
+        report += "**4️⃣ نظام قياس الاستهلاك (KB/MB):**\n"
+        report += f"  📊 الحالة: {'✅ مفعل' if self.stats_available else '❌ غير متاح'}\n"
+        if not self.stats_available:
+            report += "  💡 السبب: السيرفر يدعم بورت واحد فقط (8100)\n"
+            report += "  💡 قياس KB/MB يحتاج بورت إضافي (10085) للـ Stats API\n"
+            report += "  💡 الحل: استخدم VPS (DigitalOcean/Hetzner) يدعم بورتات متعددة\n"
+        else:
+            try:
+                cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT}"
+                result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8').strip()
+                if result:
+                    stats = json.loads(result)
+                    stat_list = stats.get('stat', [])
+                    user_stats = [s for s in stat_list if s.get('name', '').startswith('user>>>')]
+                    report += f"  ✅ Stats API شغال!\n"
+                    report += f"  📊 إحصائيات: {len(stat_list)} | مشتركين: {len(user_stats)}\n"
+                    for s in user_stats[:4]:
+                        name = s.get('name', '')
+                        val = int(s.get('value', 0))
+                        parts = name.split('>>>')
+                        email = parts[1] if len(parts) > 1 else '?'
+                        direction = parts[3] if len(parts) > 3 else '?'
+                        report += f"  └ `{email}` ({direction}): {val/1024:.1f} KB\n"
+            except Exception as e:
+                report += f"  ⚠️ خطأ: `{str(e)[:150]}`\n"
         report += "\n"
 
         # 5. سجل xray
-        report += "**5️⃣ سجل xray (آخر 5 أسطر):**\n"
+        report += "**5️⃣ سجل xray (آخر 3 أسطر):**\n"
         xray_log = f"{HOME_DIR}/xray_core/xray.log"
-        try:
-            if os.path.exists(xray_log) and os.path.getsize(xray_log) > 0:
-                with open(xray_log, 'r') as f:
-                    lines = f.readlines()
-                    for line in lines[-5:]:
-                        report += f"  `{line.strip()[:100]}`\n"
-            else:
-                report += "  (فارغ أو غير موجود)\n"
-        except:
-            report += "  ⚠️ تعذرت القراءة\n"
+        xray_err = f"{HOME_DIR}/xray_core/error.log"
+        found_log = False
+        for log_path in [xray_log, xray_err]:
+            try:
+                if os.path.exists(log_path) and os.path.getsize(log_path) > 0:
+                    found_log = True
+                    with open(log_path, 'r') as f:
+                        lines = f.readlines()
+                        report += f"  📄 `{os.path.basename(log_path)}`:\n"
+                        for line in lines[-3:]:
+                            report += f"  `{line.strip()[:100]}`\n"
+            except:
+                pass
+        if not found_log:
+            report += "  (فارغ أو غير موجود)\n"
+        report += "\n"
 
         return report
-
-    # ----------------------------------------------------------------------
-    # 🔧 إصلاح الإحصائيات يدوياً
-    # ----------------------------------------------------------------------
-    def fix_stats_config(self):
-        """يحدّث الكونفك لإضافة نظام الإحصائيات ويعيد تشغيل xray"""
-        try:
-            config = self._load_config()
-            if config is None:
-                return False, "ملف الكونفك غير موجود"
-
-            existing_clients = []
-            if isinstance(config.get('inbounds'), list):
-                for inb in config['inbounds']:
-                    if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
-                        settings = inb.get('settings') or {}
-                        existing_clients = settings.get('clients') or []
-                        break
-
-            full_config = self._build_full_config(existing_clients, config)
-            self._save_config(full_config)
-            self.restart_xray()
-
-            time.sleep(5)
-            if self._is_stats_port_open():
-                self.stats_available = True
-                return True, "تم تفعيل نظام الإحصائيات بنجاح!"
-            elif self._is_xray_running():
-                self.stats_available = False
-                return True, "xray شغال لكن بورت Stats لسه ما فتح — جرب ريستارت من لوحة التحكم"
-            else:
-                self.stats_available = False
-                return False, "xray ما اشتغل — ممكن البورت 10085 مو مدعوم. جرب ريستارت xray من لوحة التحكم"
-        except Exception as e:
-            return False, f"خطأ: {e}"
 
     # ----------------------------------------------------------------------
     # 🔄 إعادة تشغيل xray (Alwaysdata API أولاً، ثم pkill/nohup كاحتياطي)

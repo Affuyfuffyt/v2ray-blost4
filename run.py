@@ -259,7 +259,6 @@ def run_diagnostics(call):
     report += f"⏱️ _وقت الفحص: {time.strftime('%Y-%m-%d %H:%M:%S')}_"
     
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔧 إصلاح الإحصائيات", callback_data="fix_stats"))
     markup.add(InlineKeyboardButton("🔄 إعادة الفحص", callback_data="run_diagnostics"))
     markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
     
@@ -267,31 +266,6 @@ def run_diagnostics(call):
         bot.edit_message_text(report, chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
     except:
         bot.send_message(chat_id, report, reply_markup=markup, parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data == "fix_stats", is_admin=True)
-def fix_stats(call):
-    chat_id = call.message.chat.id
-    bot.answer_callback_query(call.id, "🔧 جاري إصلاح الإحصائيات...")
-    
-    bot.edit_message_text(
-        "🔧 جاري تحديث الكونفك وإعادة تشغيل xray...\nانتظر 10 ثواني...",
-        chat_id, call.message.message_id
-    )
-    
-    success, msg = api.fix_stats_config()
-    
-    result = f"🔧 **نتيجة الإصلاح:**\n\n"
-    result += f"{'✅' if success else '❌'} {msg}\n\n"
-    result += "اضغط 'إعادة الفحص' لرؤية الحالة الحالية."
-    
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔄 إعادة الفحص", callback_data="run_diagnostics"))
-    markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
-    
-    try:
-        bot.edit_message_text(result, chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-    except:
-        bot.send_message(chat_id, result, reply_markup=markup, parse_mode="Markdown")
 
 # ==========================================
 # 4. تشغيل النظام بالكامل
