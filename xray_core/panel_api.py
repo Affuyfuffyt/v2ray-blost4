@@ -148,7 +148,7 @@ class PanelAPI:
     # 👤 إضافة مشترك (الزراعة)
     # ----------------------------------------------------------------------
     def create_client(self, email, uuid, protocol="vless"):
-        """يضيف مشترك جديد إلى البوابة الأولى ثم يعيد تشغيل xray."""
+        """يضيف مشترك جديد إلى بوابة VLESS ثم يعيد تشغيل xray."""
         try:
             config = self._load_config()
             if config is None:
@@ -158,8 +158,15 @@ class PanelAPI:
                 print("❌ لا يوجد inbounds في ملف الكونفك")
                 return False
 
-            # نتأكد من أن settings و clients موجودين (setdefault على dict جذري)
-            inbound  = config['inbounds'][0]
+            # نبحث عن بوابة VLESS (مو بوابة API)
+            inbound = None
+            for inb in config['inbounds']:
+                if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
+                    inbound = inb
+                    break
+            if inbound is None:
+                print("❌ لا توجد بوابة VLESS في الكونفك")
+                return False
             settings = inbound.setdefault('settings', {})
             clients  = settings.setdefault('clients', [])
 
