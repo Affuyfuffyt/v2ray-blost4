@@ -9,10 +9,13 @@ ERROR_LOG = os.path.join(BASE_DIR, 'monitor_error.log')
 
 def start_quota_monitor():
     api = PanelAPI()
-    print("🕵️‍♂️ نظام مراقبة الوقت الاحترافي يعمل الآن (تم إلغاء نظام الجيجات لتخفيف الضغط على السيرفر)")
+    print("🕵️‍♂️ نظام مراقبة الوقت + الاستهلاك يعمل الآن")
+    
+    traffic_counter = 0  # عداد لفحص الاستهلاك كل 30 ثانية
     
     while True:
-        time.sleep(3) # المهلة الأساسية 3 ثواني لفحص الوقت فقط (خفيف جداً على المعالج)
+        time.sleep(3)
+        traffic_counter += 3
         
         # =========================================================
         # 1. نظام الطرد الصارم للوقت ⏱️ (يشتغل كل 3 ثواني)
@@ -38,4 +41,23 @@ def start_quota_monitor():
         except Exception as e:
             with open(ERROR_LOG, 'a') as f:
                 f.write(f"\n[{time.ctime()}] Time Monitor Logic Error: {str(e)}")
-            pass
+
+        # =========================================================
+        # 2. نظام قياس الاستهلاك 📊 (يشتغل كل 30 ثانية)
+        # =========================================================
+        if traffic_counter >= 30:
+            traffic_counter = 0
+            try:
+                traffic = api.get_all_clients_traffic(reset=True)
+                if traffic:
+                    db = load_db()
+                    changed = False
+                    for email, bytes_used in traffic.items():
+                        if email in db and bytes_used > 0:
+                            db[email]['used_bytes'] = db[email].get('used_bytes', 0) + bytes_used
+                            changed = True
+                    if changed:
+                        update_db(db)
+            except Exception as e:
+                with open(ERROR_LOG, 'a') as f:
+                    f.write(f"\n[{time.ctime()}] Traffic Monitor Error: {str(e)}")
