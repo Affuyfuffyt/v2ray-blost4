@@ -267,7 +267,7 @@ def database_expiry_watchdog(bot):
                     try: extend_json_expiry(ref_email, reward_sec)
                     except: pass
                     
-                    # 🔥 التعديل الجراحي: إضافة زراعة الكود وعمل ريستارت 🔥
+                    # 🔥 التعديل الجراحي: إضافة زراعة الكود من جديد وعمل ريستارت 🔥
                     try:
                         db_path = os.path.join(base_dir, "database.db")
                         if not os.path.exists(db_path): db_path = "database.db"
@@ -281,16 +281,16 @@ def database_expiry_watchdog(bot):
                             user_uuid, user_server_id, current_expiry = row
                             now = time.time()
                             
-                            # إذا الكود كان منتهي، نجدد الوقت من اللحظة الحالية
+                            # تصحيح المشكلة: إذا الكود كان منتهي قبل المكافأة، نجدد الوقت من اللحظة الحالية!
                             if current_expiry and float(current_expiry) < now:
                                 new_expiry = now + reward_sec
                                 c.execute("UPDATE users SET expiry=?, status='active' WHERE email=?", (new_expiry, ref_email))
                                 conn.commit()
                             
-                            # زراعة الكود من جديد
+                            # 1. زراعة الكود من جديد في ملف الكونفك
                             add_client_to_config(ref_email, user_uuid, "vless", user_server_id, bot, c_id)
                             
-                            # عمل ريستارت لتفعيل الكود
+                            # 2. عمل ريستارت فوري لتفعيل الكود وإدخاله بالسيرفر
                             restart_alwaysdata(bot, c_id, f"🔄 تم تحديث السيرفر لتفعيل مكافأة الدعوة للمشترك `{ref_email}`! 🚀", f"⚠️ فشل الريستارت التلقائي للسيرفر ({user_server_id}).", user_server_id)
                             
                         conn.close()
