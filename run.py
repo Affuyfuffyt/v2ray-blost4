@@ -1,368 +1,408 @@
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import threading
-import subprocess
-import time
-import config
+import json
 import os
-from xray_core.panel_api import PanelAPI
+import requests
+import time
+import subprocess
+from dotenv import load_dotenv
 
-# استدعاء المعالجات
-from handlers import admin_start, create_flow, manage_flow, speed_test, radar_flow
-from handlers import user_handlers # ملف واجهة المشتركين
-from handlers import servers_flow # 🔥 إضافة ملف إدارة السيرفرات الجديد 🔥
+# 🔥 مسارات ديناميكية ذكية
+HOME_DIR = os.path.expanduser("~")
+CONFIG_PATH = f'{HOME_DIR}/xray_core/config.json'
+XRAY_BIN = f'{HOME_DIR}/xray_core/xray'
 
-# استدعاء المراقبين
-from quota_monitor import start_quota_monitor 
-from radar_monitor import start_radar_monitor 
-try:
-    from user_notifier import start_notifier # نظام التنبيهات
-except ImportError:
-    def start_notifier(bot): pass
+# ⚙️ الإعدادات الثابتة التي يجب أن تطابق ما يرسله تطبيق DarkTunnel
+FIXED_PORT     = 8100
+FIXED_PROTOCOL = "vless"
+FIXED_NETWORK  = "ws"
+FIXED_PATH     = "/xray"
+FIXED_LISTEN   = "0.0.0.0"
+STATS_API_PORT = 10085
 
-# 1. تهيئة البوت والـ API
-bot = telebot.TeleBot(config.BOT_TOKEN)
-api = PanelAPI()
+# ملف حالة نظام الإحصائيات
+STATS_STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.stats_enabled')
 
-# 🔥 التصليح الجذري للفلتر حتى ما يعلك الأزرار (مثل حالة الخادم) 🔥
-class IsAdmin(telebot.custom_filters.SimpleCustomFilter):
-    key = 'is_admin'
-    def check(self, obj):
-        # إذا كانت الضغطة من زر (CallbackQuery)
-        if hasattr(obj, 'message'):
-            return str(obj.message.chat.id) == str(config.ADMIN_ID)
-        # إذا كانت رسالة نصية عادية (Message)
-        return str(obj.chat.id) == str(config.ADMIN_ID)
 
-bot.add_custom_filter(IsAdmin())
+class PanelAPI:
+    def __init__(self):
+        load_dotenv()
+        # مفاتيح Alwaysdata API (لإعادة تشغيل الموقع بعد التعديل)
+        self.api_key = os.getenv('AD_API_KEY')
+        self.site_id = os.getenv('AD_SITE_ID')
+        self.stats_available = False
+        # نضمن أن ملف الكونفك بالشكل الصحيح فور تشغيل البوت — بدون مسح المشتركين
+        self.ensure_base_config()
 
-# ==========================================
-# 📊 قسم حالة الخادم (Server Status)
-# ==========================================
-live_monitors = {}
+    # ----------------------------------------------------------------------
+    # 📂 قراءة وحفظ ملف الكونفك
+    # ----------------------------------------------------------------------
+    def _load_config(self):
+        if not os.path.exists(CONFIG_PATH):
+            return None
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
 
-def get_server_status_text():
-    try:
-        # قراءة CPU من /proc/stat (أخف بكثير من top -bn1)
+    def _save_config(self, config):
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    # ----------------------------------------------------------------------
+    # 🔍 فحص إذا xray شغال
+    # ----------------------------------------------------------------------
+    def _is_xray_running(self):
         try:
-            with open('/proc/stat', 'r') as f:
-                line = f.readline()
-            parts = line.split()
-            idle = int(parts[4])
-            total = sum(int(p) for p in parts[1:])
-            if not hasattr(get_server_status_text, '_prev'):
-                get_server_status_text._prev = (idle, total)
-            prev_idle, prev_total = get_server_status_text._prev
-            diff_idle = idle - prev_idle
-            diff_total = total - prev_total
-            cpu_usage = (1.0 - diff_idle / diff_total) * 100 if diff_total > 0 else 0.0
-            get_server_status_text._prev = (idle, total)
+            # نبحث عن عملية xray بأي شكل كانت
+            result = subprocess.getoutput("ps aux | grep -i xray | grep -v grep")
+            if result.strip():
+                return True
+            # على Alwaysdata، نتحقق عبر محاولة الاتصال بالبورت
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            connected = sock.connect_ex(('127.0.0.1', FIXED_PORT)) == 0
+            sock.close()
+            return connected
         except:
-            cpu_usage = 0.0
-        
-        # قراءة RAM من /proc/meminfo (أخف من free -m)
+            return False
+
+    # ----------------------------------------------------------------------
+    # 🛠️ بناء كونفك VLESS أساسي (بدون إحصائيات)
+    # ----------------------------------------------------------------------
+    def _build_base_config(self, existing_clients, config):
+        vless_inbound = {
+            "port": FIXED_PORT,
+            "listen": FIXED_LISTEN,
+            "protocol": FIXED_PROTOCOL,
+            "settings": {
+                "clients": existing_clients,
+                "decryption": "none"
+            },
+            "streamSettings": {
+                "network": FIXED_NETWORK,
+                "wsSettings": {
+                    "path": FIXED_PATH
+                }
+            },
+            "tag": "vless-in"
+        }
+
+        config['inbounds'] = [vless_inbound]
+
+        # إزالة إعدادات الإحصائيات
+        config.pop('stats', None)
+        config.pop('api', None)
+        config.pop('policy', None)
+
+        # إزالة قاعدة توجيه API من الراوتينق
+        routing = config.get('routing', {})
+        rules = routing.get('rules', [])
+        rules = [r for r in rules if r.get('outboundTag') != 'api']
+        routing['rules'] = rules
+        config['routing'] = routing
+
+        # نتأكد من وجود outbound افتراضي
+        if not config.get('outbounds'):
+            config['outbounds'] = [{"protocol": "freedom", "tag": "freedom"}]
+
+        return config
+
+    # ----------------------------------------------------------------------
+    # 📊 بناء كونفك مع نظام الإحصائيات
+    # ----------------------------------------------------------------------
+    def _build_stats_config(self, existing_clients, config):
+        vless_inbound = {
+            "port": FIXED_PORT,
+            "listen": FIXED_LISTEN,
+            "protocol": FIXED_PROTOCOL,
+            "settings": {
+                "clients": existing_clients,
+                "decryption": "none"
+            },
+            "streamSettings": {
+                "network": FIXED_NETWORK,
+                "wsSettings": {
+                    "path": FIXED_PATH
+                }
+            },
+            "tag": "vless-in"
+        }
+
+        api_inbound = {
+            "listen": "127.0.0.1",
+            "port": STATS_API_PORT,
+            "protocol": "dokodemo-door",
+            "settings": {"address": "127.0.0.1"},
+            "tag": "api"
+        }
+
+        config['inbounds'] = [api_inbound, vless_inbound]
+
+        # تفعيل نظام الإحصائيات لكل مشترك
+        config['stats'] = {}
+        config['api'] = {
+            "tag": "api",
+            "services": ["StatsService"]
+        }
+        config['policy'] = {
+            "levels": {
+                "0": {
+                    "statsUserUplink": True,
+                    "statsUserDownlink": True
+                }
+            },
+            "system": {
+                "statsInboundUplink": True,
+                "statsInboundDownlink": True
+            }
+        }
+
+        # نتأكد من وجود outbound افتراضي
+        if not config.get('outbounds'):
+            config['outbounds'] = [{"protocol": "freedom", "tag": "freedom"}]
+
+        # إضافة قاعدة توجيه API (لازم تكون أول قاعدة)
+        routing = config.get('routing', {})
+        rules = routing.get('rules', [])
+        api_rule = {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
+        has_api_rule = any(r.get('outboundTag') == 'api' for r in rules)
+        if not has_api_rule:
+            rules.insert(0, api_rule)
+        routing['rules'] = rules
+        config['routing'] = routing
+
+        return config
+
+    # ----------------------------------------------------------------------
+    # 🛠️ ضبط الكونفك الأساسي بدون المساس بالمشتركين الموجودين
+    # ----------------------------------------------------------------------
+    def ensure_base_config(self):
+        """يضمن وجود بوابة VLESS واحدة بإعدادات صحيحة،
+        مع الحفاظ على قائمة المشتركين (clients) كما هي."""
         try:
-            meminfo = {}
-            with open('/proc/meminfo', 'r') as f:
-                for line in f:
-                    parts = line.split()
-                    meminfo[parts[0].rstrip(':')] = int(parts[1])
-            ram_total = meminfo.get('MemTotal', 0) // 1024
-            ram_available = meminfo.get('MemAvailable', 0) // 1024
-            ram_used = ram_total - ram_available
-            ram_percent = int((ram_used / ram_total) * 100) if ram_total > 0 else 0
-        except:
-            ram_total = ram_used = ram_percent = 0
-        
-        disk_total = subprocess.getoutput("df -h / | tail -1 | awk '{print $2}'")
-        disk_used = subprocess.getoutput("df -h / | tail -1 | awk '{print $3}'")
-        disk_percent_str = subprocess.getoutput("df -h / | tail -1 | awk '{print $5}'").replace('%', '')
-        disk_percent = int(disk_percent_str) if disk_percent_str.isdigit() else 0
+            config = self._load_config()
+            if config is None:
+                print(f"❌ ملف الكونفك غير موجود: {CONFIG_PATH}")
+                return
 
-        def make_bar(percent):
-            filled = int(percent / 10)
-            return '█' * filled + '▒' * (10 - filled)
+            # نلتقط المشتركين الموجودين سلفاً كي لا نفقدهم عند إعادة الضبط
+            existing_clients = []
+            if isinstance(config.get('inbounds'), list):
+                for inb in config['inbounds']:
+                    if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
+                        settings = inb.get('settings') or {}
+                        existing_clients = settings.get('clients') or []
+                        break
 
-        text = f"🖥️ | 𝗦𝗘𝗥𝗩𝗘𝗥 𝗥𝗘𝗦𝗢𝗨𝗥𝗖𝗘𝗦\n"
-        text += f"━━━━━━━━━━━━━━━━━━\n"
-        text += f"⚙️ **CPU:** `[{make_bar(cpu_usage)}]` {cpu_usage:.1f}%\n"
-        text += f"🗄️ **RAM:** `[{make_bar(ram_percent)}]` {ram_percent}%\n"
-        text += f"    └ 📊 {ram_used}MB / {ram_total}MB\n"
-        text += f"💾 **Disk:** `[{make_bar(disk_percent)}]` {disk_percent}%\n"
-        text += f"    └ 📊 {disk_used} / {disk_total}\n"
-        text += f"━━━━━━━━━━━━━━━━━━\n"
-        text += f"⏱️ _آخر تحديث: {time.strftime('%H:%M:%S')}_\n"
-        
-        return text
-    except Exception as e:
-        return "⚠️ حدث خطأ أثناء جلب بيانات السيرفر."
+            # نتأكد من إعدادات اللوق
+            log_cfg = config.get('log') or {}
+            log_cfg.setdefault('access', 'access.log')
+            log_cfg.setdefault('error', 'error.log')
+            log_cfg.setdefault('loglevel', 'warning')
+            config['log'] = log_cfg
 
-def get_status_keyboard(is_live=False):
-    markup = InlineKeyboardMarkup(row_width=2)
-    if not is_live:
-        btn_refresh = InlineKeyboardButton("🔄 تحديث الآن", callback_data="status_refresh")
-        btn_live = InlineKeyboardButton("📡 تحديث مستمر (2 دقيقة)", callback_data="status_live")
-        markup.add(btn_refresh, btn_live)
-    else:
-        btn_stop = InlineKeyboardButton("🛑 إيقاف التحديث", callback_data="status_stop")
-        markup.add(btn_stop)
-    markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
-    return markup
-
-# ==========================================
-# 3. تسجيل المعالجات (Handlers)
-# ==========================================
-create_flow.register_create_handlers(bot)
-manage_flow.register_manage_handlers(bot)
-speed_test.register_speed_handlers(bot)
-radar_flow.register_radar_handlers(bot)
-user_handlers.register_user_handlers(bot) 
-servers_flow.register_servers_handlers(bot) # 🔥 تفعيل أزرار شبكة السيرفرات الجديدة 🔥
-
-# 🔥 فتح أمر البداية للكل مع صائد الأخطاء ومطابقة الـ ID 🔥
-@bot.message_handler(commands=['start'])
-def start_command(message):
-    chat_id = message.chat.id
-    try:
-        # مقارنة دقيقة للتأكد من التعرف على الأدمن
-        if str(chat_id) == str(config.ADMIN_ID):
-            admin_start.show_main_menu(bot, chat_id)
-        else:
-            # توجيه المستخدم العادي
-            user_handlers.show_user_main_menu(bot, chat_id)
-    except Exception as e:
-        bot.send_message(chat_id, f"⚠️ عذراً، حدث خطأ داخلي في البوت:\n`{e}`", parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data == "server_status", is_admin=True)
-def send_server_status(call):
-    text = get_server_status_text()
-    markup = get_status_keyboard()
-    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
-    bot.answer_callback_query(call.id)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("status_"), is_admin=True)
-def handle_status_callbacks(call):
-    chat_id = call.message.chat.id
-    msg_id = call.message.message_id
-    
-    if call.data == "status_refresh":
-        text = get_server_status_text()
-        markup = get_status_keyboard()
-        bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "✅ تم تحديث بيانات السيرفر!")
-        
-    elif call.data == "status_live":
-        bot.answer_callback_query(call.id, "📡 تم تفعيل المراقبة الحية لمدة دقيقتين!")
-        live_monitors[msg_id] = True
-        markup = get_status_keyboard(is_live=True)
-        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=markup)
-        
-        def live_update_thread():
-            end_time = time.time() + 120
-            while time.time() < end_time and live_monitors.get(msg_id, False):
-                time.sleep(3)
-                if not live_monitors.get(msg_id, False): break
-                try:
-                    text = get_server_status_text()
-                    markup = get_status_keyboard(is_live=True)
-                    bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-                except: pass
-            
-            live_monitors[msg_id] = False
+            # نتحقق إذا الإحصائيات سبق وفشلت على هذا الهوست
+            stats_previously_failed = False
             try:
-                final_text = get_server_status_text() + "\n*(انتهت المراقبة المستمرة)*"
-                markup = get_status_keyboard(is_live=False)
-                bot.edit_message_text(final_text, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-            except: pass
+                if os.path.exists(STATS_STATUS_FILE):
+                    with open(STATS_STATUS_FILE, 'r') as f:
+                        stats_previously_failed = (f.read().strip() == 'disabled')
+            except:
+                pass
 
-        threading.Thread(target=live_update_thread).start()
-        
-    elif call.data == "status_stop":
-        live_monitors[msg_id] = False
-        bot.answer_callback_query(call.id, "🛑 تم إيقاف المراقبة الحية.")
-
-# ==========================================
-# 🔍 قسم التشخيص وسجل الأخطاء
-# ==========================================
-@bot.callback_query_handler(func=lambda call: call.data == "run_diagnostics", is_admin=True)
-def run_diagnostics(call):
-    chat_id = call.message.chat.id
-    bot.answer_callback_query(call.id, "🔍 جاري الفحص...")
-    
-    import json
-    import sqlite3
-    from database import JSON_DB_PATH, SQLITE_DB_PATH, load_db
-    from xray_core.panel_api import CONFIG_PATH, XRAY_BIN, STATS_API_PORT
-    
-    report = "🔍 **تقرير التشخيص الشامل**\n"
-    report += "━━━━━━━━━━━━━━━━━━\n\n"
-    
-    # 1. فحص ملف الكونفك
-    report += "**1️⃣ ملف كونفك xray:**\n"
-    try:
-        if os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH, 'r') as f:
-                cfg = json.load(f)
-            
-            has_stats = 'stats' in cfg
-            has_api = 'api' in cfg
-            has_policy = 'policy' in cfg
-            
-            api_inbound = False
-            vless_inbound = False
-            clients_count = 0
-            for inb in cfg.get('inbounds', []):
-                if inb.get('protocol') == 'dokodemo-door':
-                    api_inbound = True
-                if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
-                    vless_inbound = True
-                    clients_count = len(inb.get('settings', {}).get('clients', []))
-            
-            report += f"  📄 الملف: موجود\n"
-            report += f"  📊 نظام الإحصائيات (stats): {'مفعل' if has_stats else '❌ غير مفعل'}\n"
-            report += f"  🔌 بوابة API: {'مفعلة' if api_inbound else '❌ غير موجودة'}\n"
-            report += f"  📡 بوابة VLESS: {'مفعلة' if vless_inbound else '❌ غير موجودة'}\n"
-            report += f"  👥 عدد المشتركين بالكونفك: {clients_count}\n"
-            report += f"  📋 policy: {'مفعل' if has_policy else '❌ غير مفعل'}\n"
-        else:
-            report += f"  ❌ الملف غير موجود: `{CONFIG_PATH}`\n"
-    except Exception as e:
-        report += f"  ❌ خطأ: `{e}`\n"
-    
-    report += "\n"
-    
-    # 2. فحص xray API
-    report += "**2️⃣ اتصال xray API:**\n"
-    report += f"  حالة النظام: {'مفعل' if api.stats_available else '❌ غير مفعل (الهوست لا يدعم بورت API)'}\n"
-    try:
-        cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT}"
-        result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8').strip()
-        if result:
-            stats = json.loads(result)
-            stat_list = stats.get('stat', [])
-            user_stats = [s for s in stat_list if s.get('name', '').startswith('user>>>')]
-            report += f"  الاتصال: ناجح\n"
-            report += f"  📊 إجمالي الإحصائيات: {len(stat_list)}\n"
-            report += f"  👤 إحصائيات المشتركين: {len(user_stats)}\n"
-            if user_stats:
-                for s in user_stats[:6]:
-                    name = s.get('name', '')
-                    val = int(s.get('value', 0))
-                    parts = name.split('>>>')
-                    email = parts[1] if len(parts) > 1 else '?'
-                    direction = parts[3] if len(parts) > 3 else '?'
-                    report += f"  └ `{email}` ({direction}): {val/1024:.1f} KB\n"
-                if len(user_stats) > 6:
-                    report += f"  └ ... و {len(user_stats)-6} إحصائية أخرى\n"
+            if stats_previously_failed:
+                # الهوست ما يدعم بورت API — نستخدم الكونفك الأساسي مباشرة
+                base_config = self._build_base_config(existing_clients, config)
+                self._save_config(base_config)
+                self.restart_xray()
+                self.stats_available = False
+                print(f"✅ تم ضبط الكونفك الأساسي — VLESS فقط على البورت {FIXED_PORT} (الإحصائيات غير مدعومة)")
             else:
-                report += "  ⚠️ لا توجد بيانات استهلاك (ربما لا يوجد مشتركين متصلين)\n"
-        else:
-            report += "  ⚠️ الاتصال ناجح لكن لا توجد بيانات\n"
-    except subprocess.CalledProcessError as e:
-        err_msg = e.output.decode('utf-8', errors='ignore') if e.output else str(e)
-        report += f"  ❌ فشل الاتصال:\n  `{err_msg[:200]}`\n"
-    except Exception as e:
-        report += f"  ❌ خطأ: `{str(e)[:200]}`\n"
-    
-    report += "\n"
-    
-    # 3. فحص قاعدة البيانات JSON
-    report += "**3️⃣ قاعدة بيانات JSON:**\n"
-    try:
-        db = load_db()
-        active = sum(1 for d in db.values() if d.get('is_active', True))
-        with_usage = sum(1 for d in db.values() if d.get('used_bytes', 0) > 0)
-        report += f"  📄 المسار: `{JSON_DB_PATH}`\n"
-        report += f"  👥 إجمالي المشتركين: {len(db)}\n"
-        report += f"  🟢 النشطين: {active}\n"
-        report += f"  📊 لديهم استهلاك: {with_usage}\n"
-        if db:
-            for email, data in list(db.items())[:3]:
-                used = data.get('used_bytes', 0)
-                used_str = f"{used/1024/1024:.2f} MB" if used > 0 else "0"
-                report += f"  └ `{email}`: {used_str}\n"
-    except Exception as e:
-        report += f"  ❌ خطأ: `{e}`\n"
-    
-    report += "\n"
-    
-    # 4. فحص قاعدة بيانات SQLite
-    report += "**4️⃣ قاعدة بيانات SQLite:**\n"
-    try:
-        if os.path.exists(SQLITE_DB_PATH):
-            conn = sqlite3.connect(SQLITE_DB_PATH)
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM users WHERE status='active'")
-            active_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM users WHERE total_connection_seconds > 0")
-            with_time = c.fetchone()[0]
-            conn.close()
-            report += f"  📄 المسار: `{SQLITE_DB_PATH}`\n"
-            report += f"  🟢 النشطين: {active_count}\n"
-            report += f"  ⏱️ لديهم وقت اتصال: {with_time}\n"
-        else:
-            report += f"  ❌ الملف غير موجود: `{SQLITE_DB_PATH}`\n"
-    except Exception as e:
-        report += f"  ❌ خطأ: `{e}`\n"
-    
-    report += "\n"
-    
-    # 5. فحص عملية xray
-    report += "**5️⃣ عملية xray:**\n"
-    try:
-        ps = subprocess.getoutput("ps aux | grep xray | grep -v grep")
-        if ps.strip():
-            report += "  🟢 xray يعمل\n"
-        else:
-            report += "  🔴 xray غير شغال!\n"
-    except:
-        report += "  ⚠️ تعذر الفحص\n"
-    
-    report += "\n"
-    
-    # 6. فحص سجل الأخطاء
-    report += "**6️⃣ آخر الأخطاء:**\n"
-    error_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monitor_error.log')
-    try:
-        if os.path.exists(error_log) and os.path.getsize(error_log) > 0:
-            with open(error_log, 'r') as f:
-                lines = f.readlines()
-                last_errors = lines[-5:]
-                for line in last_errors:
-                    report += f"  `{line.strip()}`\n"
-        else:
-            report += "  لا توجد أخطاء مسجلة\n"
-    except:
-        report += "  ⚠️ تعذرت القراءة\n"
-    
-    report += "\n━━━━━━━━━━━━━━━━━━\n"
-    report += f"⏱️ _وقت الفحص: {time.strftime('%Y-%m-%d %H:%M:%S')}_"
-    
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔄 إعادة الفحص", callback_data="run_diagnostics"))
-    markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
-    
-    try:
-        bot.edit_message_text(report, chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-    except:
-        bot.send_message(chat_id, report, reply_markup=markup, parse_mode="Markdown")
+                # أول مرة — نجرب مع الإحصائيات
+                stats_config = self._build_stats_config(existing_clients, json.loads(json.dumps(config)))
+                self._save_config(stats_config)
+                self.restart_xray()
 
-# ==========================================
-# 4. تشغيل النظام بالكامل
-# ==========================================
-if __name__ == "__main__":
-    print(f"🚀 البوت يعمل الآن للأدمن ID: {config.ADMIN_ID}")
-    
-    threading.Thread(target=start_quota_monitor, daemon=True).start()
-    threading.Thread(target=start_radar_monitor, daemon=True).start()
-    
-    # تشغيل مراقب الإشعارات التلقائية للعملاء بالخلفية
-    threading.Thread(target=start_notifier, args=(bot,), daemon=True).start()
-    
-    print("📡 نظام الرادار ومراقبة الوقت يعملان الآن بالخلفية...")
-    
-    try:
-        # إضافة timeout لتجنب توقف البوت فجأة
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
-    except Exception as e:
-        print(f"❌ حدث خطأ في البوت: {e}")
+                # ننتظر ونتحقق إذا xray شغال
+                time.sleep(5)
+                if self._is_xray_running():
+                    self.stats_available = True
+                    try:
+                        with open(STATS_STATUS_FILE, 'w') as f:
+                            f.write('enabled')
+                    except:
+                        pass
+                    print(f"✅ تم ضبط الكونفك بنجاح — VLESS + نظام إحصائيات على البورت {FIXED_PORT}")
+                else:
+                    # فشل — نرجع للكونفك الأساسي
+                    print("⚠️ xray لم يشتغل مع الإحصائيات — نرجع للكونفك الأساسي بدون API")
+                    base_config = self._build_base_config(existing_clients, config)
+                    self._save_config(base_config)
+                    self.restart_xray()
+                    self.stats_available = False
+                    try:
+                        with open(STATS_STATUS_FILE, 'w') as f:
+                            f.write('disabled')
+                    except:
+                        pass
+                    print(f"✅ تم ضبط الكونفك الأساسي — VLESS فقط على البورت {FIXED_PORT} (بدون إحصائيات)")
+
+            # نسجل البورت النشط بملف نصي للمراقبة
+            try:
+                with open(f'{HOME_DIR}/active_port.txt', 'w') as f:
+                    f.write(str(FIXED_PORT))
+            except Exception:
+                pass
+
+        except Exception as e:
+            print(f"Error ensuring base config: {e}")
+
+    # ----------------------------------------------------------------------
+    # 👤 إضافة مشترك (الزراعة)
+    # ----------------------------------------------------------------------
+    def create_client(self, email, uuid, protocol="vless"):
+        """يضيف مشترك جديد إلى بوابة VLESS ثم يعيد تشغيل xray."""
+        try:
+            config = self._load_config()
+            if config is None:
+                print(f"❌ ملف الكونفك غير موجود: {CONFIG_PATH}")
+                return False
+            if not config.get('inbounds'):
+                print("❌ لا يوجد inbounds في ملف الكونفك")
+                return False
+
+            # نبحث عن بوابة VLESS (مو بوابة API)
+            inbound = None
+            for inb in config['inbounds']:
+                if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
+                    inbound = inb
+                    break
+            if inbound is None:
+                print("❌ لا توجد بوابة VLESS في الكونفك")
+                return False
+            settings = inbound.setdefault('settings', {})
+            clients  = settings.setdefault('clients', [])
+
+            already_exists = any(
+                c.get('email') == email or c.get('id') == uuid
+                for c in clients
+            )
+            if not already_exists:
+                clients.append({"id": uuid, "email": email, "level": 0})
+                self._save_config(config)
+                print(f"✅ تمت زراعة المشترك: {email}")
+            else:
+                print(f"ℹ️ المشترك {email} موجود سلفاً — تم تخطي الإضافة")
+
+            return self.restart_xray()
+        except Exception as e:
+            print(f"Error creating client locally: {e}")
+            return False
+
+    # ----------------------------------------------------------------------
+    # 🗑️ حذف مشترك (بالاسم أو بالـ UUID)
+    # ----------------------------------------------------------------------
+    def delete_client(self, email):
+        """يحذف مشترك بناءً على الـ email."""
+        return self._remove_client(lambda c: c.get('email') != email)
+
+    def remove_client(self, uuid):
+        """يحذف مشترك بناءً على الـ UUID."""
+        return self._remove_client(lambda c: c.get('id') != uuid)
+
+    def _remove_client(self, filter_fn):
+        try:
+            config = self._load_config()
+            if config is None or not config.get('inbounds'):
+                return False
+
+            changed = False
+            for inbound in config.get('inbounds', []):
+                settings = inbound.get('settings') or {}
+                clients  = settings.get('clients') or []
+                new_clients = [c for c in clients if filter_fn(c)]
+                if len(new_clients) != len(clients):
+                    settings['clients'] = new_clients
+                    inbound['settings'] = settings
+                    changed = True
+
+            if changed:
+                self._save_config(config)
+                return self.restart_xray()
+            return True
+        except Exception as e:
+            print(f"Error removing client: {e}")
+            return False
+
+    # ----------------------------------------------------------------------
+    # 🔄 تغيير حالة مشترك (التعطيل = حذف)
+    # ----------------------------------------------------------------------
+    def change_client_status(self, email, inbound_id=None, uuid=None, enable=True):
+        if not enable:
+            return self.delete_client(email)
+        # التفعيل يتم عبر create_client من create_flow.py
+        return True
+
+    # ----------------------------------------------------------------------
+    # 📊 إحصائيات الترافيك لكل مشترك
+    # ----------------------------------------------------------------------
+    def get_client_traffic(self, email):
+        """يرجع إجمالي الترافيك (uplink + downlink) لمشترك معين بالبايت."""
+        traffic = self.get_all_clients_traffic(reset=False)
+        return traffic.get(email, 0)
+
+    def get_all_clients_traffic(self, reset=True):
+        """يرجع قاموس بالترافيك لكل المشتركين. مع reset=True يصفر العدادات بعد القراءة."""
+        if not self.stats_available:
+            return {}
+        try:
+            reset_flag = "-reset=true" if reset else ""
+            cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT} {reset_flag}"
+            result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8').strip()
+            if not result:
+                return {}
+            stats = json.loads(result)
+            traffic = {}
+            for stat in stats.get('stat', []):
+                name = stat.get('name', '')
+                value = int(stat.get('value', 0))
+                # نفلتر بس الإحصائيات الخاصة بالمشتركين
+                if name.startswith('user>>>'):
+                    parts = name.split('>>>')
+                    if len(parts) >= 4:
+                        email = parts[1]
+                        traffic[email] = traffic.get(email, 0) + value
+            return traffic
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ xray API خطأ: {e.output.decode('utf-8', errors='ignore') if e.output else str(e)}")
+            self.stats_available = False
+            return {}
+        except Exception as e:
+            print(f"⚠️ خطأ في جلب الترافيك: {e}")
+            return {}
+
+    # ----------------------------------------------------------------------
+    # 🔄 إعادة تشغيل xray (Alwaysdata API أولاً، ثم pkill/nohup كاحتياطي)
+    # ----------------------------------------------------------------------
+    def restart_xray(self):
+        # 1) إذا توفرت مفاتيح Alwaysdata نستخدم الـ API الرسمي
+        if self.api_key and self.site_id:
+            try:
+                url = f"https://api.alwaysdata.com/v1/site/{self.site_id}/restart/"
+                r = requests.post(url, auth=(self.api_key, ''), timeout=15)
+                if r.status_code in (200, 201, 202, 204):
+                    return True
+                print(f"⚠️ Alwaysdata restart failed: {r.status_code} {r.text}")
+            except Exception as e:
+                print(f"⚠️ Alwaysdata restart error: {e}")
+
+        # 2) الـ fallback: تشغيل xray مباشرة (مفيد على VPS عادي)
+        try:
+            os.system(
+                f"pkill -9 xray 2>/dev/null ; "
+                f"nohup {HOME_DIR}/xray_core/xray run -c {CONFIG_PATH} "
+                f"> {HOME_DIR}/xray_core/xray.log 2>&1 &"
+            )
+            time.sleep(0.5)
+            return True
+        except Exception as e:
+            print(f"Restart fallback error: {e}")
+            return False
