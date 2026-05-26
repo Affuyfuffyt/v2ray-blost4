@@ -2,11 +2,13 @@ import json
 import os
 import requests
 import time
+import subprocess
 from dotenv import load_dotenv
 
 # 🔥 مسارات ديناميكية ذكية
 HOME_DIR = os.path.expanduser("~")
 CONFIG_PATH = f'{HOME_DIR}/xray_core/config.json'
+XRAY_BIN = f'{HOME_DIR}/xray_core/xray'
 
 # ⚙️ الإعدادات الثابتة التي يجب أن تطابق ما يرسله تطبيق DarkTunnel
 FIXED_PORT     = 8100
@@ -14,6 +16,7 @@ FIXED_PROTOCOL = "vless"
 FIXED_NETWORK  = "ws"
 FIXED_PATH     = "/xray"
 FIXED_LISTEN   = "0.0.0.0"
+STATS_API_PORT = 10085
 
 
 class PanelAPI:
@@ -52,12 +55,15 @@ class PanelAPI:
 
             # نلتقط المشتركين الموجودين سلفاً كي لا نفقدهم عند إعادة الضبط
             existing_clients = []
-            if isinstance(config.get('inbounds'), list) and config['inbounds']:
-                settings = config['inbounds'][0].get('settings') or {}
-                existing_clients = settings.get('clients') or []
+            if isinstance(config.get('inbounds'), list):
+                for inb in config['inbounds']:
+                    if inb.get('protocol') in ('vless', 'vmess', 'trojan'):
+                        settings = inb.get('settings') or {}
+                        existing_clients = settings.get('clients') or []
+                        break
 
-            # نعيد بناء البوابة الواحدة بشكل نظيف (VLESS + WS + Path /xray)
-            config['inbounds'] = [{
+            # نعيد بناء البوابة (VLESS + WS + Path /xray) + بوابة API للإحصائيات
+            vless_inbound = {
                 "port": FIXED_PORT,
                 "listen": FIXED_LISTEN,
                 "protocol": FIXED_PROTOCOL,
@@ -70,12 +76,52 @@ class PanelAPI:
                     "wsSettings": {
                         "path": FIXED_PATH
                     }
+                },
+                "tag": "vless-in"
+            }
+
+            api_inbound = {
+                "listen": "127.0.0.1",
+                "port": STATS_API_PORT,
+                "protocol": "dokodemo-door",
+                "settings": {"address": "127.0.0.1"},
+                "tag": "api"
+            }
+
+            config['inbounds'] = [api_inbound, vless_inbound]
+
+            # تفعيل نظام الإحصائيات لكل مشترك
+            config['stats'] = {}
+            config['api'] = {
+                "tag": "api",
+                "services": ["StatsService"]
+            }
+            config['policy'] = {
+                "levels": {
+                    "0": {
+                        "statsUserUplink": True,
+                        "statsUserDownlink": True
+                    }
+                },
+                "system": {
+                    "statsInboundUplink": True,
+                    "statsInboundDownlink": True
                 }
-            }]
+            }
 
             # نتأكد من وجود outbound افتراضي
             if not config.get('outbounds'):
                 config['outbounds'] = [{"protocol": "freedom", "tag": "freedom"}]
+
+            # إضافة قاعدة توجيه API (لازم تكون أول قاعدة)
+            routing = config.get('routing', {})
+            rules = routing.get('rules', [])
+            api_rule = {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
+            has_api_rule = any(r.get('outboundTag') == 'api' for r in rules)
+            if not has_api_rule:
+                rules.insert(0, api_rule)
+            routing['rules'] = rules
+            config['routing'] = routing
 
             # نتأكد من إعدادات اللوك (نحافظ على القيم الحالية إن وُجدت)
             log_cfg = config.get('log') or {}
@@ -178,10 +224,43 @@ class PanelAPI:
         return True
 
     # ----------------------------------------------------------------------
-    # 📊 إحصائيات الترافيك (غير مدعومة في وضع xray-core المحلي)
+    # 📊 إحصائيات الترافيك لكل مشترك
     # ----------------------------------------------------------------------
     def get_client_traffic(self, email):
-        return 0
+        """يرجع إجمالي الترافيك (uplink + downlink) لمشترك معين بالبايت."""
+        try:
+            cmd = f"{XRAY_BIN} api statsquery --server=127.0.0.1:{STATS_API_PORT} -pattern 'user>>>{email}>>>'"
+            result = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, timeout=3).decode('utf-8').strip()
+            if not result:
+                return 0
+            stats = json.loads(result)
+            total = 0
+            for stat in stats.get('stat', []):
+                total += int(stat.get('value', 0))
+            return total
+        except Exception:
+            return 0
+
+    def get_all_clients_traffic(self, reset=True):
+        """يرجع قاموس بالترافيك لكل المشتركين. مع reset=True يصفر العدادات بعد القراءة."""
+        try:
+            reset_flag = "-reset" if reset else ""
+            cmd = f"{XRAY_BIN} api statsquery --server=127.0.0.1:{STATS_API_PORT} -pattern 'user>>>' {reset_flag}"
+            result = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, timeout=3).decode('utf-8').strip()
+            if not result:
+                return {}
+            stats = json.loads(result)
+            traffic = {}
+            for stat in stats.get('stat', []):
+                name = stat.get('name', '')
+                value = int(stat.get('value', 0))
+                parts = name.split('>>>')
+                if len(parts) >= 4 and parts[0] == 'user':
+                    email = parts[1]
+                    traffic[email] = traffic.get(email, 0) + value
+            return traffic
+        except Exception:
+            return {}
 
     # ----------------------------------------------------------------------
     # 🔄 إعادة تشغيل xray (Alwaysdata API أولاً، ثم pkill/nohup كاحتياطي)
