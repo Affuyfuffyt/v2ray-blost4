@@ -136,7 +136,7 @@ def register_manage_handlers(bot):
                               chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     # 2. زر تفاصيل المشترك
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("user_"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("user_") and call.data != "user_main_menu")
     def show_user_details(call):
         chat_id = call.message.chat.id
         email = call.data.split('user_')[1]
