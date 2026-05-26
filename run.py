@@ -82,6 +82,7 @@ def get_status_keyboard(is_live=False):
     else:
         btn_stop = InlineKeyboardButton("🛑 إيقاف التحديث", callback_data="status_stop")
         markup.add(btn_stop)
+    markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
     return markup
 
 # ==========================================
