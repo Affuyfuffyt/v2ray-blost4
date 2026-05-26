@@ -45,6 +45,7 @@ class PanelAPI:
     # 🔍 فحص إذا xray شغال (عبر بورت VLESS)
     # ----------------------------------------------------------------------
     def _is_xray_running(self):
+        # طريقة 1: فحص البورت
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
@@ -54,10 +55,26 @@ class PanelAPI:
                 return True
         except:
             pass
+        # طريقة 2: فحص العمليات
         try:
             result = subprocess.getoutput("ps aux 2>/dev/null | grep '[x]ray'")
             if result.strip():
                 return True
+        except:
+            pass
+        # طريقة 3: فحص error.log — على Alwaysdata البوت ما يشوف عملية xray
+        # لأنهم user programs منفصلين، بس يتشاركون نفس الملفات
+        try:
+            error_log = f"{HOME_DIR}/xray_core/error.log"
+            if os.path.exists(error_log):
+                mod_time = os.path.getmtime(error_log)
+                # إذا الملف تعدل خلال آخر 5 دقائق، يعني xray شغال
+                if time.time() - mod_time < 300:
+                    with open(error_log, 'r') as f:
+                        lines = f.readlines()
+                        for line in reversed(lines[-10:]):
+                            if 'started' in line.lower():
+                                return True
         except:
             pass
         return False
@@ -361,21 +378,58 @@ class PanelAPI:
 
         # 3. عملية xray
         report += "**3️⃣ عملية xray:**\n"
+        ps_found = False
         try:
             ps = subprocess.getoutput("ps aux 2>/dev/null | grep '[x]ray'")
             if ps.strip():
-                report += f"  ✅ شغال\n"
+                ps_found = True
+                report += f"  ✅ شغال (ps aux)\n"
                 for line in ps.strip().split('\n')[:2]:
                     parts = line.split()
                     if len(parts) > 10:
                         report += f"  └ PID: {parts[1]} | CPU: {parts[2]}% | MEM: {parts[3]}%\n"
-            else:
-                report += "  🔴 غير شغال (ps aux)\n"
         except:
-            report += "  ⚠️ تعذر فحص العمليات\n"
+            pass
 
-        vless_open = self._is_xray_running()
-        report += f"  🚪 بورت {FIXED_PORT} (VLESS): {'✅ مفتوح' if vless_open else '❌ مغلق'}\n"
+        # فحص error.log — على Alwaysdata البوت ما يشوف عملية xray مباشرة
+        log_started = False
+        try:
+            error_log = f"{HOME_DIR}/xray_core/error.log"
+            if os.path.exists(error_log):
+                mod_time = os.path.getmtime(error_log)
+                age_mins = (time.time() - mod_time) / 60
+                with open(error_log, 'r') as f:
+                    lines = f.readlines()
+                    for line in reversed(lines[-10:]):
+                        if 'started' in line.lower():
+                            log_started = True
+                            break
+                if log_started:
+                    if not ps_found:
+                        report += f"  ✅ شغال (error.log يؤكد التشغيل)\n"
+                        report += f"  ℹ️ البوت ما يقدر يشوف العملية مباشرة (user programs منفصلين)\n"
+                else:
+                    if not ps_found:
+                        report += f"  🔴 غير شغال\n"
+        except:
+            if not ps_found:
+                report += f"  🔴 غير شغال\n"
+
+        xray_running = ps_found or log_started
+        vless_open = False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            vless_open = sock.connect_ex(('127.0.0.1', FIXED_PORT)) == 0
+            sock.close()
+        except:
+            pass
+        if vless_open:
+            report += f"  🚪 بورت {FIXED_PORT} (VLESS): ✅ مفتوح\n"
+        elif xray_running:
+            report += f"  🚪 بورت {FIXED_PORT}: ℹ️ لا يمكن الفحص من البوت (عمليات منفصلة)\n"
+        else:
+            report += f"  🚪 بورت {FIXED_PORT} (VLESS): ❌ مغلق\n"
         report += "\n"
 
         # 4. نظام الإحصائيات
