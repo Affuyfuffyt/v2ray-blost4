@@ -2,20 +2,17 @@ import time
 import subprocess
 import json
 import os
+import socket
 
-# 🔥 الحل الجذري: تحديد المسارات ديناميكياً لتجنب تضارب الأسماء 🔥
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_SERVER = '127.0.0.1:10085'
-# اكتشاف مسار المحرك تلقائياً في أي حساب
+API_PORT = 10085
 XRAY_BIN = os.path.expanduser('~/xray_core/xray')
-# حفظ ملف الإحصائيات داخل مجلد البوت الحالي مهما كان اسمه
 STATS_FILE = os.path.join(BASE_DIR, 'global_stats.json')
 
-# الأرقام التراكمية
 total_down = 0
 total_up = 0
 
-# قراءة الاستهلاك القديم إذا كان السيرفر مطفي واشتغل
 if os.path.exists(STATS_FILE):
     try:
         with open(STATS_FILE, 'r') as f:
@@ -27,11 +24,28 @@ if os.path.exists(STATS_FILE):
 
 print(f"🚀 بدء نظام المراقبة الشامل في مجلد: {os.path.basename(BASE_DIR)}")
 
-while True:
+def is_api_available():
     try:
-        # سحب وتصفير العداد من المحرك عبر API
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        result = sock.connect_ex(('127.0.0.1', API_PORT))
+        sock.close()
+        return result == 0
+    except:
+        return False
+
+api_available = is_api_available()
+if not api_available:
+    print("⚠️ Stats API غير متاح (بورت 10085 مغلق) — المراقبة متوقفة")
+
+while True:
+    if not api_available:
+        time.sleep(300)
+        api_available = is_api_available()
+        continue
+    try:
         cmd = f"{XRAY_BIN} api statsquery -server={API_SERVER} -reset=true"
-        result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=2).decode('utf-8')
+        result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8')
         
         if result.strip():
             stats = json.loads(result)
@@ -40,25 +54,22 @@ while True:
             for stat in stat_list:
                 name = stat.get('name', '')
                 value = int(stat.get('value', 0))
-                
-                # 🎯 السر هنا: نراقب مخرج الـ freedom حصراً لأنه يمثل الإنترنت الفعلي
                 if 'outbound>>>freedom' in name:
                     if 'downlink' in name:
                         total_down += value
                     elif 'uplink' in name:
                         total_up += value
             
-            # حفظ الاستهلاك الكلي بالملف بشكل آمن
             with open(STATS_FILE, 'w') as f:
                 json.dump({'total_down': total_down, 'total_up': total_up}, f)
             
-            # طباعة الأرقام بالميجا بايت بالشاشة للمتابعة
             mb_down = total_down / 1024 / 1024
             mb_up = total_up / 1024 / 1024
             print(f"📊 استهلاك السيرفر: تحميل ({mb_down:.2f} MB) | رفع ({mb_up:.2f} MB)")
             
     except Exception as e:
-        # في حال وجود خطأ في الـ API (مثل المحرك متوقف) لا يتوقف السكربت
-        pass
+        api_available = is_api_available()
+        if not api_available:
+            print("⚠️ Stats API غير متاح — المراقبة متوقفة مؤقتاً")
         
-    time.sleep(1) # التحديث كل ثانية واحدة
+    time.sleep(30)

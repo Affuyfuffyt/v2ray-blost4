@@ -74,10 +74,15 @@ def get_server_status_text():
         except:
             ram_total = ram_used = ram_percent = 0
         
-        disk_total = subprocess.getoutput("df -h / | tail -1 | awk '{print $2}'")
-        disk_used = subprocess.getoutput("df -h / | tail -1 | awk '{print $3}'")
-        disk_percent_str = subprocess.getoutput("df -h / | tail -1 | awk '{print $5}'").replace('%', '')
-        disk_percent = int(disk_percent_str) if disk_percent_str.isdigit() else 0
+        try:
+            df_line = subprocess.getoutput("df -h / | tail -1").split()
+            disk_total = df_line[1] if len(df_line) > 1 else "?"
+            disk_used = df_line[2] if len(df_line) > 2 else "?"
+            disk_percent_str = df_line[4].replace('%', '') if len(df_line) > 4 else "0"
+            disk_percent = int(disk_percent_str) if disk_percent_str.isdigit() else 0
+        except:
+            disk_total = disk_used = "?"
+            disk_percent = 0
 
         def make_bar(percent):
             filled = int(percent / 10)
