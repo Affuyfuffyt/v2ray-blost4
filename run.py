@@ -233,6 +233,7 @@ def run_diagnostics(call):
     
     # 2. فحص xray API
     report += "**2️⃣ اتصال xray API:**\n"
+    report += f"  حالة النظام: {'مفعل' if api.stats_available else '❌ غير مفعل (الهوست لا يدعم بورت API)'}\n"
     try:
         cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT}"
         result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8').strip()
