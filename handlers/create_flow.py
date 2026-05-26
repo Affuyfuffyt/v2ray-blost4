@@ -326,6 +326,7 @@ def register_create_handlers(bot):
             s_id, s_name, s_site_id, s_status = s
             if s_status == 'active':
                 markup.add(InlineKeyboardButton(f"🖥️ {s_name}", callback_data=f"sel_srv_{s_id}"))
+        markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
 
         bot.edit_message_text("🌐 **في أي سيرفر تريد إنشاء المشترك؟**", chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 

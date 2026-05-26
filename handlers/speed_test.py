@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # 🔥 الحل الجذري: مسار ديناميكي يكتشف مجلد البوت تلقائياً 🔥
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,4 +53,6 @@ def register_speed_handlers(bot):
             
             time.sleep(1) # التحديث بالتيليجرام كل ثانية
             
-        bot.edit_message_text(f"✅ **انتهى الفحص بنجاح.**\nالمدة الإجمالية: {duration} ثواني.", chat_id, status_msg.message_id, parse_mode="Markdown")
+        done_markup = InlineKeyboardMarkup()
+        done_markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
+        bot.edit_message_text(f"✅ **انتهى الفحص بنجاح.**\nالمدة الإجمالية: {duration} ثواني.", chat_id, status_msg.message_id, reply_markup=done_markup, parse_mode="Markdown")
