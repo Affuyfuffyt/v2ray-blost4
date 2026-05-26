@@ -235,25 +235,15 @@ class PanelAPI:
     # ----------------------------------------------------------------------
     def get_client_traffic(self, email):
         """يرجع إجمالي الترافيك (uplink + downlink) لمشترك معين بالبايت."""
-        try:
-            cmd = f"{XRAY_BIN} api statsquery --server=127.0.0.1:{STATS_API_PORT} -pattern 'user>>>{email}>>>'"
-            result = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, timeout=3).decode('utf-8').strip()
-            if not result:
-                return 0
-            stats = json.loads(result)
-            total = 0
-            for stat in stats.get('stat', []):
-                total += int(stat.get('value', 0))
-            return total
-        except Exception:
-            return 0
+        traffic = self.get_all_clients_traffic(reset=False)
+        return traffic.get(email, 0)
 
     def get_all_clients_traffic(self, reset=True):
         """يرجع قاموس بالترافيك لكل المشتركين. مع reset=True يصفر العدادات بعد القراءة."""
         try:
-            reset_flag = "-reset" if reset else ""
-            cmd = f"{XRAY_BIN} api statsquery --server=127.0.0.1:{STATS_API_PORT} -pattern 'user>>>' {reset_flag}"
-            result = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, timeout=3).decode('utf-8').strip()
+            reset_flag = "-reset=true" if reset else ""
+            cmd = f"{XRAY_BIN} api statsquery -server=127.0.0.1:{STATS_API_PORT} {reset_flag}"
+            result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode('utf-8').strip()
             if not result:
                 return {}
             stats = json.loads(result)
@@ -261,12 +251,18 @@ class PanelAPI:
             for stat in stats.get('stat', []):
                 name = stat.get('name', '')
                 value = int(stat.get('value', 0))
-                parts = name.split('>>>')
-                if len(parts) >= 4 and parts[0] == 'user':
-                    email = parts[1]
-                    traffic[email] = traffic.get(email, 0) + value
+                # نفلتر بس الإحصائيات الخاصة بالمشتركين
+                if name.startswith('user>>>'):
+                    parts = name.split('>>>')
+                    if len(parts) >= 4:
+                        email = parts[1]
+                        traffic[email] = traffic.get(email, 0) + value
             return traffic
-        except Exception:
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ xray API خطأ: {e.output.decode('utf-8', errors='ignore') if e.output else str(e)}")
+            return {}
+        except Exception as e:
+            print(f"⚠️ خطأ في جلب الترافيك: {e}")
             return {}
 
     # ----------------------------------------------------------------------
