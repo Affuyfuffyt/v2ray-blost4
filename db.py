@@ -78,16 +78,66 @@ def init_sqlite_db():
                   ftp_pass TEXT, 
                   status TEXT)''')
                   
-    # تسجيل السيرفر الحالي كسيرفر رئيسي (حتى ما تعطل الأكواد القديمة)
+    # تسجيل السيرفر الحالي كسيرفر رئيسي
     c.execute("SELECT COUNT(*) FROM servers")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO servers (id, name, site_id, api_key, ftp_host, ftp_user, ftp_pass, status) VALUES (1, 'السيرفر الرئيسي (المحلي)', 'local', 'local', 'local', 'local', 'local', 'active')")
+
+    # 🔥🔥 5. الجدول الجديد: إدارة الأدمنية 🔥🔥
+    c.execute('''CREATE TABLE IF NOT EXISTS admins
+                 (admin_id TEXT PRIMARY KEY, added_by TEXT, added_at TEXT)''')
 
     conn.commit()
     conn.close()
 
 # ==========================================
-# 🖥️ دوال إدارة شبكة السيرفرات (جديد)
+# 👑 دوال إدارة الأدمنية (جديد)
+# ==========================================
+def add_admin(admin_id, added_by):
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT admin_id FROM admins WHERE admin_id=?", (str(admin_id),))
+    if c.fetchone():
+        conn.close()
+        return False # موجود مسبقاً
+    
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT INTO admins (admin_id, added_by, added_at) VALUES (?, ?, ?)", (str(admin_id), str(added_by), now_str))
+    conn.commit()
+    conn.close()
+    return True
+
+def remove_admin(admin_id):
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT admin_id FROM admins WHERE admin_id=?", (str(admin_id),))
+    if not c.fetchone():
+        conn.close()
+        return False # غير موجود أصلاً
+        
+    c.execute("DELETE FROM admins WHERE admin_id=?", (str(admin_id),))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_all_admins():
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT admin_id, added_by, added_at FROM admins")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def is_admin_in_db(chat_id):
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT admin_id FROM admins WHERE admin_id=?", (str(chat_id),))
+    result = c.fetchone()
+    conn.close()
+    return bool(result)
+
+# ==========================================
+# 🖥️ دوال إدارة شبكة السيرفرات
 # ==========================================
 def add_server(name, site_id, api_key, ftp_host, ftp_user, ftp_pass):
     conn = sqlite3.connect(SQLITE_DB_PATH)
@@ -123,7 +173,6 @@ def delete_server(server_id):
 # ==========================================
 # 👥 دوال المشتركين العامة
 # ==========================================
-# تم إضافة server_id للدالة
 def add_user(email, uuid, port, quota_bytes, expiry_date, server_id=1):
     conn = sqlite3.connect(SQLITE_DB_PATH)
     c = conn.cursor()
