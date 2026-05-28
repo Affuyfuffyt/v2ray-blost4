@@ -130,13 +130,12 @@ def register_manage_handlers(bot):
         for email, data in db.items():
             status = "🟢" if data.get('is_active', True) else "🔴"
             markup.add(InlineKeyboardButton(f"{status} {email}", callback_data=f"user_{email}"))
-        markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
         
         bot.edit_message_text("👥 **قائمة المشتركين:**\nاختر مشتركاً لعرض تفاصيله:", 
                               chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     # 2. زر تفاصيل المشترك
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("user_") and call.data != "user_main_menu")
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("user_"))
     def show_user_details(call):
         chat_id = call.message.chat.id
         email = call.data.split('user_')[1]
@@ -242,7 +241,6 @@ def register_manage_handlers(bot):
             InlineKeyboardButton("شهر", callback_data="rdur_30d"),
             InlineKeyboardButton("مدة يدوية ✍️", callback_data="rdur_manual")
         )
-        markup.add(InlineKeyboardButton("🔙 رجوع لتفاصيل المشترك", callback_data=f"user_{email}"))
         bot.edit_message_text(f"♻️ تمديد للمشترك `{email}`\n\n⏳ اختر المدة الجديدة:", chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("rdur_"))
@@ -277,9 +275,6 @@ def register_manage_handlers(bot):
             InlineKeyboardButton("بلا حدود ♾️", callback_data="rquota_unlimited"),
             InlineKeyboardButton("سعة يدوية ✍️", callback_data="rquota_manual")
         )
-        email = renew_data.get(chat_id, {}).get('email', '')
-        if email:
-            markup.add(InlineKeyboardButton("🔙 رجوع لتفاصيل المشترك", callback_data=f"user_{email}"))
         text = "📊 حدد السعة الجديدة للتمديد:"
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
@@ -316,9 +311,6 @@ def register_manage_handlers(bot):
             InlineKeyboardButton("VMESS", callback_data="rproto_vmess"),
             InlineKeyboardButton("Trojan", callback_data="rproto_trojan")
         )
-        email = renew_data.get(chat_id, {}).get('email', '')
-        if email:
-            markup.add(InlineKeyboardButton("🔙 رجوع لتفاصيل المشترك", callback_data=f"user_{email}"))
         text = "🌐 **أخيراً.. اختر بروتوكول المشترك لإعادة تفعيله:**"
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
