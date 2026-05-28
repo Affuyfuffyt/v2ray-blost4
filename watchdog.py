@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 """
-حارس البوت (Watchdog) — يُشغّل كـ Scheduled Task على Alwaysdata
-يفحص إذا البوت شغال ويعيد تشغيله إذا توقف.
-
-الإعداد على Alwaysdata:
-1. ادخل على admin.alwaysdata.net
-2. اذهب إلى Advanced > Scheduled Tasks
-3. أضف مهمة جديدة:
-   - Type: python
-   - Command: /home/linkapp/[اسم_المجلد]/watchdog.py
-   - Frequency: Every 5 minutes
+حارس البوت (Watchdog) المطوّر — يُشغّل كـ Scheduled Task على Alwaysdata
+يفحص وجود عملية run.py تحديداً بدلاً من الاعتماد على PID الوهمي.
 """
 import os
 import sys
@@ -23,35 +15,38 @@ LOG_FILE = os.path.join(BOT_DIR, 'watchdog.log')
 
 def log(msg):
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-    with open(LOG_FILE, 'a') as f:
-        f.write(f"[{timestamp}] {msg}\n")
-    # نحافظ على حجم الملف صغير (آخر 100 سطر)
     try:
-        with open(LOG_FILE, 'r') as f:
+        # إضافة ترميز utf-8 لضمان حفظ اللغة العربية بدون مشاكل
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"[{timestamp}] {msg}\n")
+        # نحافظ على حجم الملف صغير (آخر 100 سطر)
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         if len(lines) > 100:
-            with open(LOG_FILE, 'w') as f:
+            with open(LOG_FILE, 'w', encoding='utf-8') as f:
                 f.writelines(lines[-100:])
-    except:
+    except Exception:
         pass
 
 def is_bot_running():
-    """فحص إذا البوت شغال عن طريق PID"""
-    if not os.path.exists(PID_FILE):
-        return False
+    """فحص دقيق جداً: يتأكد من اسم الملف run.py في نظام السيرفر بدلاً من رقم PID"""
     try:
-        with open(PID_FILE, 'r') as f:
-            pid = int(f.read().strip())
-        # فحص إذا العملية موجودة
-        os.kill(pid, 0)
-        return True
-    except (ProcessLookupError, ValueError, PermissionError):
-        return False
-    except Exception:
-        return False
+        # نبحث عن سكربت run.py في العمليات الشغالة الفعلية
+        # استخدام [r] يمنع أمر grep من صيد نفسه بالخطأ
+        cmd = "ps x -o pid,command | grep '[r]un.py'"
+        output = subprocess.check_output(cmd, shell=True).decode('utf-8')
+        
+        # إذا وجدنا run.py ضمن القائمة، فالبوت يعمل
+        if 'run.py' in output:
+            return True
+    except subprocess.CalledProcessError:
+        # إذا فشل الأمر، معناه run.py غير موجود بالعمليات
+        pass
+    
+    return False
 
 def start_bot():
-    """تشغيل البوت بالخلفية"""
+    """تشغيل البوت بالخلفية وفصله عن الجلسة لمنع الإغلاق المفاجئ"""
     try:
         bot_log = os.path.join(BOT_DIR, 'bot_output.log')
         process = subprocess.Popen(
@@ -59,11 +54,11 @@ def start_bot():
             cwd=BOT_DIR,
             stdout=open(bot_log, 'a'),
             stderr=subprocess.STDOUT,
-            start_new_session=True
+            start_new_session=True # 🔥 تمنع السيرفر من إغلاق البوت عند انتهاء مهمة الحارس
         )
         with open(PID_FILE, 'w') as f:
             f.write(str(process.pid))
-        log(f"✅ تم تشغيل البوت (PID: {process.pid})")
+        log(f"✅ تم تشغيل البوت (run.py) بنجاح (PID: {process.pid})")
         return True
     except Exception as e:
         log(f"❌ فشل تشغيل البوت: {e}")
@@ -71,12 +66,14 @@ def start_bot():
 
 if __name__ == "__main__":
     if is_bot_running():
-        log("✅ البوت شغال — لا حاجة للتدخل")
+        log("✅ البوت (run.py) شغال — لا حاجة للتدخل")
     else:
-        log("⚠️ البوت متوقف — جاري إعادة التشغيل...")
-        # حذف PID القديم
+        log("⚠️ البوت متوقف — جاري إعادة التشغيل فوراً...")
+        # حذف ملف PID القديم لتنظيف السجلات
         try:
-            os.remove(PID_FILE)
+            if os.path.exists(PID_FILE):
+                os.remove(PID_FILE)
         except:
             pass
+        
         start_bot()
