@@ -26,9 +26,7 @@ def extend_json_expiry(email, extra_seconds):
     data = load_db()
     if email in data:
         current_expiry = data[email].get('expiry_time', time.time())
-        # 🔥 إذا كان منتهي (في الماضي) نبدأ من الوقت الحالي لكي تستفيد المدة الجديدة فعلياً
-        base = max(current_expiry, time.time())
-        data[email]['expiry_time'] = base + extra_seconds
+        data[email]['expiry_time'] = current_expiry + extra_seconds
         data[email]['is_active'] = True
         update_db(data)
         return True
@@ -85,53 +83,8 @@ def init_sqlite_db():
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO servers (id, name, site_id, api_key, ftp_host, ftp_user, ftp_pass, status) VALUES (1, 'السيرفر الرئيسي (المحلي)', 'local', 'local', 'local', 'local', 'local', 'active')")
 
-    # 5. جدول الأدمنية
-    c.execute('''CREATE TABLE IF NOT EXISTS admins
-                 (chat_id TEXT PRIMARY KEY, added_by TEXT, added_at TEXT)''')
-
     conn.commit()
     conn.close()
-
-# ==========================================
-# 👑 دوال إدارة الأدمنية
-# ==========================================
-def add_admin(chat_id, added_by="owner"):
-    conn = sqlite3.connect(SQLITE_DB_PATH)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO admins (chat_id, added_by, added_at) VALUES (?, ?, ?)",
-                  (str(chat_id), str(added_by), str(datetime.datetime.now())))
-        conn.commit()
-        success = True
-    except sqlite3.IntegrityError:
-        success = False
-    conn.close()
-    return success
-
-def remove_admin(chat_id):
-    conn = sqlite3.connect(SQLITE_DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM admins WHERE chat_id=?", (str(chat_id),))
-    changed = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return changed
-
-def get_all_admins():
-    conn = sqlite3.connect(SQLITE_DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT chat_id, added_by, added_at FROM admins")
-    admins = c.fetchall()
-    conn.close()
-    return admins
-
-def is_admin_in_db(chat_id):
-    conn = sqlite3.connect(SQLITE_DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT chat_id FROM admins WHERE chat_id=?", (str(chat_id),))
-    found = c.fetchone() is not None
-    conn.close()
-    return found
 
 # ==========================================
 # 🖥️ دوال إدارة شبكة السيرفرات (جديد)
@@ -272,25 +225,12 @@ def extend_user_expiry(email, extra_seconds):
     data = c.fetchone()
     if data and data[0]:
         current_expiry = float(data[0])
-        # 🔥 إذا كان الاشتراك منتهي (في الماضي) نبدأ من الوقت الحالي
-        # حتى لا تضيع ثواني التمديد الجديدة
-        base = max(current_expiry, time.time())
-        new_expiry = base + extra_seconds
+        new_expiry = current_expiry + extra_seconds
         c.execute("UPDATE users SET expiry_date=?, status='active' WHERE email=?", (str(new_expiry), email))
         conn.commit()
         conn.close()
         return new_expiry
     return None
-
-# 🔥 دالة لجلب بيانات المشترك الكاملة اللازمة لإعادة زراعته في الكونفك 🔥
-def get_user_full_info(email):
-    """ترجع (uuid, port, server_id, expiry_date, status) للمشترك المطلوب."""
-    conn = sqlite3.connect(SQLITE_DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT uuid, port, server_id, expiry_date, status FROM users WHERE email=?", (email,))
-    data = c.fetchone()
-    conn.close()
-    return data
 
 def add_pending_reward(referrer, invited, seconds, chat_id):
     conn = sqlite3.connect(SQLITE_DB_PATH)
