@@ -14,6 +14,7 @@ from handlers import user_handlers # ملف واجهة المشتركين
 from handlers import servers_flow # 🔥 إضافة ملف إدارة السيرفرات الجديد 🔥
 
 # استدعاء المراقبين
+from radar_monitor import start_radar_monitor
 try:
     from user_notifier import start_notifier
 except ImportError:
@@ -401,6 +402,9 @@ if __name__ == "__main__":
         f.write(str(os.getpid()))
 
     print(f"🚀 البوت يعمل الآن للأدمن ID: {config.ADMIN_ID} (PID: {os.getpid()})")
+    
+    # تشغيل الرادار (مراقبة النشطين من access.log)
+    threading.Thread(target=start_radar_monitor, daemon=True).start()
     
     # تشغيل مراقب الإشعارات التلقائية للعملاء بالخلفية
     threading.Thread(target=start_notifier, args=(bot,), daemon=True).start()
