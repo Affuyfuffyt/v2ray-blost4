@@ -13,10 +13,8 @@ from handlers import user_handlers # ملف واجهة المشتركين
 from handlers import servers_flow # 🔥 إضافة ملف إدارة السيرفرات الجديد 🔥
 
 # استدعاء المراقبين
-from quota_monitor import start_quota_monitor 
-from radar_monitor import start_radar_monitor 
 try:
-    from user_notifier import start_notifier # نظام التنبيهات
+    from user_notifier import start_notifier
 except ImportError:
     def start_notifier(bot): pass
 
@@ -204,28 +202,21 @@ def run_diagnostics(call):
     # التشخيص التفصيلي من panel_api
     report += api.run_stats_diagnostic()
     
-    # 6. قاعدة بيانات JSON
-    report += "**6️⃣ قاعدة بيانات JSON:**\n"
+    # 5. قاعدة بيانات JSON
+    report += "**5️⃣ قاعدة بيانات JSON:**\n"
     try:
         db = load_db()
         active = sum(1 for d in db.values() if d.get('is_active', True))
-        with_usage = sum(1 for d in db.values() if d.get('used_bytes', 0) > 0)
         report += f"  📄 المسار: `{JSON_DB_PATH}`\n"
         report += f"  👥 إجمالي المشتركين: {len(db)}\n"
         report += f"  🟢 النشطين: {active}\n"
-        report += f"  📊 لديهم استهلاك: {with_usage}\n"
-        if db:
-            for email, data in list(db.items())[:3]:
-                used = data.get('used_bytes', 0)
-                used_str = f"{used/1024/1024:.2f} MB" if used > 0 else "0"
-                report += f"  └ `{email}`: {used_str}\n"
     except Exception as e:
         report += f"  ❌ خطأ: `{e}`\n"
     
     report += "\n"
     
-    # 7. قاعدة بيانات SQLite
-    report += "**7️⃣ قاعدة بيانات SQLite:**\n"
+    # 6. قاعدة بيانات SQLite
+    report += "**6️⃣ قاعدة بيانات SQLite:**\n"
     try:
         if os.path.exists(SQLITE_DB_PATH):
             conn = sqlite3.connect(SQLITE_DB_PATH)
@@ -245,8 +236,8 @@ def run_diagnostics(call):
     
     report += "\n"
     
-    # 8. سجل الأخطاء
-    report += "**8️⃣ آخر الأخطاء:**\n"
+    # 7. سجل الأخطاء
+    report += "**7️⃣ آخر الأخطاء:**\n"
     error_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monitor_error.log')
     try:
         if os.path.exists(error_log) and os.path.getsize(error_log) > 0:
@@ -278,13 +269,8 @@ def run_diagnostics(call):
 if __name__ == "__main__":
     print(f"🚀 البوت يعمل الآن للأدمن ID: {config.ADMIN_ID}")
     
-    threading.Thread(target=start_quota_monitor, daemon=True).start()
-    threading.Thread(target=start_radar_monitor, daemon=True).start()
-    
     # تشغيل مراقب الإشعارات التلقائية للعملاء بالخلفية
     threading.Thread(target=start_notifier, args=(bot,), daemon=True).start()
-    
-    print("📡 نظام الرادار ومراقبة الوقت يعملان الآن بالخلفية...")
     
     try:
         # إضافة timeout لتجنب توقف البوت فجأة
