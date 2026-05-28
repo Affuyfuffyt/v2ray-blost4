@@ -108,7 +108,8 @@ servers_flow.register_servers_handlers(bot)
 @bot.callback_query_handler(func=lambda call: call.data in ["main_menu", "admin_main_menu", "back"])
 def global_back_handler(call):
     chat_id = call.message.chat.id
-    bot.clear_step_handler_by_chat_id(chat_id) 
+    try: bot.clear_step_handler_by_chat_id(chat_id) 
+    except: pass
     if check_is_admin(chat_id):
         admin_start.show_main_menu(bot, chat_id, call.message.message_id)
     else:
@@ -118,7 +119,8 @@ def global_back_handler(call):
 @bot.message_handler(commands=['start'])
 def start_command(message):
     chat_id = message.chat.id
-    bot.clear_step_handler_by_chat_id(chat_id) 
+    try: bot.clear_step_handler_by_chat_id(chat_id) 
+    except: pass
     try:
         if check_is_admin(chat_id):
             admin_start.show_main_menu(bot, chat_id)
@@ -176,14 +178,94 @@ def handle_status_callbacks(call):
         bot.answer_callback_query(call.id, "🛑 تم إيقاف المراقبة الحية.")
 
 # ==========================================
-# 👑 قسم إدارة الأدمنية (تم الدمج بنجاح)
+# 🔍 قسم التشخيص وسجل الأخطاء
+# ==========================================
+@bot.callback_query_handler(func=lambda call: call.data == "run_diagnostics", is_admin=True)
+def run_diagnostics(call):
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id, "🔍 جاري الفحص...")
+    
+    import json
+    import sqlite3
+    from database import JSON_DB_PATH, SQLITE_DB_PATH, load_db
+    
+    report = "🔍 **تقرير التشخيص الشامل**\n"
+    report += "━━━━━━━━━━━━━━━━━━\n\n"
+    
+    # التشخيص التفصيلي من panel_api
+    report += api.run_stats_diagnostic()
+    
+    # 5. قاعدة بيانات JSON
+    report += "**5️⃣ قاعدة بيانات JSON:**\n"
+    try:
+        db = load_db()
+        active = sum(1 for d in db.values() if d.get('is_active', True))
+        report += f"  📄 المسار: `{JSON_DB_PATH}`\n"
+        report += f"  👥 إجمالي المشتركين: {len(db)}\n"
+        report += f"  🟢 النشطين: {active}\n"
+    except Exception as e:
+        report += f"  ❌ خطأ: `{e}`\n"
+    
+    report += "\n"
+    
+    # 6. قاعدة بيانات SQLite
+    report += "**6️⃣ قاعدة بيانات SQLite:**\n"
+    try:
+        if os.path.exists(SQLITE_DB_PATH):
+            conn = sqlite3.connect(SQLITE_DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM users WHERE status='active'")
+            active_count = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM users WHERE total_connection_seconds > 0")
+            with_time = c.fetchone()[0]
+            conn.close()
+            report += f"  📄 المسار: `{SQLITE_DB_PATH}`\n"
+            report += f"  🟢 النشطين: {active_count}\n"
+            report += f"  ⏱️ لديهم وقت اتصال: {with_time}\n"
+        else:
+            report += f"  ❌ الملف غير موجود: `{SQLITE_DB_PATH}`\n"
+    except Exception as e:
+        report += f"  ❌ خطأ: `{e}`\n"
+    
+    report += "\n"
+    
+    # 7. سجل الأخطاء
+    report += "**7️⃣ آخر الأخطاء:**\n"
+    error_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monitor_error.log')
+    try:
+        if os.path.exists(error_log) and os.path.getsize(error_log) > 0:
+            with open(error_log, 'r') as f:
+                lines = f.readlines()
+                last_errors = lines[-5:]
+                for line in last_errors:
+                    report += f"  `{line.strip()}`\n"
+        else:
+            report += "  لا توجد أخطاء مسجلة\n"
+    except:
+        report += "  ⚠️ تعذرت القراءة\n"
+    
+    report += "\n━━━━━━━━━━━━━━━━━━\n"
+    report += f"⏱️ _وقت الفحص: {time.strftime('%Y-%m-%d %H:%M:%S')}_"
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔄 إعادة الفحص", callback_data="run_diagnostics"))
+    markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
+    
+    try:
+        bot.edit_message_text(report, chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    except:
+        bot.send_message(chat_id, report, reply_markup=markup, parse_mode="Markdown")
+
+# ==========================================
+# 👑 قسم إدارة الأدمنية
 # ==========================================
 admin_add_state = {}
 
 @bot.callback_query_handler(func=lambda call: call.data == "manage_admins", is_admin=True)
 def manage_admins_menu(call):
     chat_id = call.message.chat.id
-    bot.clear_step_handler_by_chat_id(chat_id)
+    try: bot.clear_step_handler_by_chat_id(chat_id)
+    except: pass
     if not is_owner(chat_id):
         bot.answer_callback_query(call.id, "⛔ فقط المالك الرئيسي يقدر يدير الأدمنية!", show_alert=True)
         return
@@ -220,7 +302,8 @@ def show_admins_panel(chat_id, message_id=None):
 @bot.callback_query_handler(func=lambda call: call.data == "admin_add_new", is_admin=True)
 def admin_add_new(call):
     chat_id = call.message.chat.id
-    bot.clear_step_handler_by_chat_id(chat_id)
+    try: bot.clear_step_handler_by_chat_id(chat_id)
+    except: pass
     if not is_owner(chat_id):
         bot.answer_callback_query(call.id, "⛔ فقط المالك الرئيسي!", show_alert=True)
         return
@@ -239,7 +322,8 @@ def admin_add_new(call):
 def admin_cancel_add(call):
     chat_id = call.message.chat.id
     admin_add_state.pop(chat_id, None)
-    bot.clear_step_handler_by_chat_id(chat_id)
+    try: bot.clear_step_handler_by_chat_id(chat_id)
+    except: pass
     bot.answer_callback_query(call.id, "تم الإلغاء")
     show_admins_panel(chat_id, call.message.message_id)
 
@@ -247,7 +331,8 @@ def admin_cancel_add(call):
 def handle_admin_id_input(msg):
     chat_id = msg.chat.id
     admin_add_state.pop(chat_id, None)
-    bot.clear_step_handler_by_chat_id(chat_id)
+    try: bot.clear_step_handler_by_chat_id(chat_id)
+    except: pass
     new_id = msg.text.strip()
 
     if not new_id.lstrip('-').isdigit():
@@ -270,7 +355,8 @@ def handle_admin_id_input(msg):
 @bot.callback_query_handler(func=lambda call: call.data == "admin_remove_menu", is_admin=True)
 def admin_remove_menu(call):
     chat_id = call.message.chat.id
-    bot.clear_step_handler_by_chat_id(chat_id)
+    try: bot.clear_step_handler_by_chat_id(chat_id)
+    except: pass
     if not is_owner(chat_id):
         bot.answer_callback_query(call.id, "⛔ فقط المالك الرئيسي!", show_alert=True)
         return
@@ -310,6 +396,14 @@ def admin_delete(call):
 if __name__ == "__main__":
     print(f"🚀 البوت يعمل الآن للأدمن ID: {config.ADMIN_ID}")
     
+    # 🔥 إضافة حفظ الـ PID لضمان التوافق التام مع الحارس (Watchdog) 
+    try:
+        pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot.pid')
+        with open(pid_file, 'w') as f:
+            f.write(str(os.getpid()))
+    except Exception as e:
+        print(f"لم يتم حفظ PID: {e}")
+
     threading.Thread(target=start_quota_monitor, daemon=True).start()
     threading.Thread(target=start_radar_monitor, daemon=True).start()
     
