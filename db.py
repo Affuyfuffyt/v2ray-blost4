@@ -85,8 +85,53 @@ def init_sqlite_db():
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO servers (id, name, site_id, api_key, ftp_host, ftp_user, ftp_pass, status) VALUES (1, 'السيرفر الرئيسي (المحلي)', 'local', 'local', 'local', 'local', 'local', 'active')")
 
+    # 5. جدول الأدمنية
+    c.execute('''CREATE TABLE IF NOT EXISTS admins
+                 (chat_id TEXT PRIMARY KEY, added_by TEXT, added_at TEXT)''')
+
     conn.commit()
     conn.close()
+
+# ==========================================
+# 👑 دوال إدارة الأدمنية
+# ==========================================
+def add_admin(chat_id, added_by="owner"):
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO admins (chat_id, added_by, added_at) VALUES (?, ?, ?)",
+                  (str(chat_id), str(added_by), str(datetime.datetime.now())))
+        conn.commit()
+        success = True
+    except sqlite3.IntegrityError:
+        success = False
+    conn.close()
+    return success
+
+def remove_admin(chat_id):
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM admins WHERE chat_id=?", (str(chat_id),))
+    changed = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+def get_all_admins():
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT chat_id, added_by, added_at FROM admins")
+    admins = c.fetchall()
+    conn.close()
+    return admins
+
+def is_admin_in_db(chat_id):
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT chat_id FROM admins WHERE chat_id=?", (str(chat_id),))
+    found = c.fetchone() is not None
+    conn.close()
+    return found
 
 # ==========================================
 # 🖥️ دوال إدارة شبكة السيرفرات (جديد)
