@@ -395,13 +395,23 @@ def admin_delete(call):
 # 4. تشغيل النظام بالكامل
 # ==========================================
 if __name__ == "__main__":
-    print(f"🚀 البوت يعمل الآن للأدمن ID: {config.ADMIN_ID}")
+    # حفظ PID للـ watchdog
+    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot.pid')
+    with open(pid_file, 'w') as f:
+        f.write(str(os.getpid()))
+
+    print(f"🚀 البوت يعمل الآن للأدمن ID: {config.ADMIN_ID} (PID: {os.getpid()})")
     
     # تشغيل مراقب الإشعارات التلقائية للعملاء بالخلفية
     threading.Thread(target=start_notifier, args=(bot,), daemon=True).start()
     
-    try:
-        # إضافة timeout لتجنب توقف البوت فجأة
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
-    except Exception as e:
-        print(f"❌ حدث خطأ في البوت: {e}")
+    # إعادة تشغيل تلقائية عند التوقف
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"❌ حدث خطأ في البوت: {e}")
+            print("🔄 إعادة التشغيل خلال 10 ثواني...")
+            time.sleep(10)
+            continue
+        break
