@@ -85,7 +85,7 @@ def register_radar_handlers(bot):
             text += "👇 **اضغط على اسم المشترك لعرض لوحته الاستخباراتية:**"
 
             markup.add(InlineKeyboardButton("🔄 تحديث الرادار", callback_data="radar_status"))
-            markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="admin_main_menu"))
+            markup.add(InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="server_status")) 
 
             bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             bot.answer_callback_query(call.id, "✅ تم التحديث")
