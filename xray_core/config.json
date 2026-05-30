@@ -50,6 +50,30 @@
     "rules": [
       {
         "type": "field",
+        "outboundTag": "direct",
+        "domain": [
+          "geosite:category-social-media",
+          "geosite:category-entertainment",
+          "geosite:category-games",
+          "geosite:category-ecommerce",
+          "geosite:category-tech",
+          "geosite:apple",
+          "geosite:google",
+          "geosite:microsoft",
+          "geosite:amazon",
+          "geosite:speedtest",
+          "domain:fast.com",
+          "domain:pubgmobile.com"
+        ]
+      },
+      {
+        "type": "field",
+        "outboundTag": "direct",
+        "port": "10000-65535",
+        "network": "udp"
+      },
+      {
+        "type": "field",
         "outboundTag": "warp-native",
         "network": "tcp,udp"
       }
