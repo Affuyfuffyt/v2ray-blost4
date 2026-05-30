@@ -15,7 +15,10 @@ def show_main_menu(bot, chat_id, message_id=None):
     # إدارة السيرفرات
     btn_servers = InlineKeyboardButton("🌐 إدارة شبكة السيرفرات", callback_data="manage_servers")
     
-    # 🔥 الزر الجديد: إدارة الأدمنية 🔥
+    # 🔥 الزر الجديد: إدارة المواقع والتوجيه (للسرعة القصوى) 🔥
+    btn_routing = InlineKeyboardButton("🔀 إدارة المواقع المفتوحة (السرعة القصوى)", callback_data="manage_routing")
+    
+    # إدارة الأدمنية
     btn_admins = InlineKeyboardButton("👑 إدارة الأدمنية", callback_data="manage_admins")
     
     # رادار السيرفر
@@ -29,7 +32,8 @@ def show_main_menu(bot, chat_id, message_id=None):
     markup.add(btn_create)
     markup.add(btn_manage)
     markup.add(btn_servers)
-    markup.add(btn_admins) # 👈 تم إضافة زر إدارة الأدمنية هنا
+    markup.add(btn_routing) # 👈 تم إضافة زر المواقع هنا
+    markup.add(btn_admins)
     markup.add(btn_radar)
     markup.add(btn_speed)
     markup.add(btn_server)
