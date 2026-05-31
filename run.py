@@ -12,7 +12,6 @@ from db import is_admin_in_db, add_admin, remove_admin, get_all_admins
 from handlers import admin_start, create_flow, manage_flow, speed_test, radar_flow
 from handlers import user_handlers # ملف واجهة المشتركين
 from handlers import servers_flow # 🔥 إضافة ملف إدارة السيرفرات الجديد 🔥
-from handlers import routing_flow # 🌟 تم إضافة ملف إدارة المواقع المفتوحة 🌟
 
 # استدعاء المراقبين
 from quota_monitor import start_quota_monitor 
@@ -104,7 +103,6 @@ speed_test.register_speed_handlers(bot)
 radar_flow.register_radar_handlers(bot)
 user_handlers.register_user_handlers(bot) 
 servers_flow.register_servers_handlers(bot) 
-routing_flow.register_routing_handlers(bot) # 🌟 تسجيل معالج المواقع 🌟
 
 # 🔥 المتحكم المركزي الموحد لزر "الرجوع" (يسيطر على كل الملفات) 🔥
 @bot.callback_query_handler(func=lambda call: call.data in ["main_menu", "admin_main_menu", "back"])
