@@ -26,15 +26,16 @@
       "tag": "proton-vpn",
       "protocol": "wireguard",
       "settings": {
-        "secretKey": "yPgaSMs7+4IZL7ZxUZaYWVduYP+egtpjXbv8hxrz6XM=",
+        "secretKey": "CGf1PIsvQ1zhHFh9MAGjbOIyNrwNWxJ/PRYDyAV/fmU=",
         "address": [
           "10.2.0.2/32",
           "2a07:b944::2:2/128"
         ],
         "peers": [
           {
-            "publicKey": "wweP0YfxgQTCes+5UoXfhLbWXvHXGnwQkozFzvBA/i4=",
-            "endpoint": "185.177.126.14:51820"
+            "publicKey": "7fu30seb7WT0ViYGe/tkjNzqgJZM3hPa0QF0g/SXnQM=",
+            "endpoint": "95.173.205.163:51820",
+            "keepAlive": 25
           }
         ],
         "mtu": 1280
