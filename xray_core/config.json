@@ -10,13 +10,7 @@
       "listen": "0.0.0.0",
       "protocol": "vless",
       "settings": {
-        "clients": [
-          {
-            "id": "b831381d-6324-4d53-ad4f-8cda48b30811",
-            "level": 0,
-            "email": "user@tunnel"
-          }
-        ],
+        "clients": [],
         "decryption": "none"
       },
       "streamSettings": {
@@ -29,17 +23,19 @@
   ],
   "outbounds": [
     {
-      "tag": "wg-tunnel",
+      "tag": "mullvad-vpn",
       "protocol": "wireguard",
       "settings": {
-        "secretKey": "QJTUFHHK2WEJT35XMZr9ParzTFxpQZyvFS4sYK5LPEw=",
+        "secretKey": "QGJmph51v2dMROxggeJ5XsAWNbkI7QLPimmkQXK7vHU=",
         "address": [
-          "10.104.4.183/32"
+          "172.16.0.2/32",
+          "2606:4700:110:8307:2ef6:e0b2:bb59:7933/128"
         ],
         "peers": [
           {
-            "publicKey": "26kgTMAJsQmfCVu/2m6T+X1CCjl07EeBUHzBwulFPHo=",
-            "endpoint": "5.196.64.231:25018"
+            "publicKey": "IJJe0TQtuQOyemL4IZn6oHEsMKSPqOuLfD5HoAWEPTY=",
+            "endpoint": "141.98.252.130:51820",
+            "keepAlive": 25
           }
         ],
         "mtu": 1280
@@ -55,7 +51,7 @@
     "rules": [
       {
         "type": "field",
-        "outboundTag": "wg-tunnel",
+        "outboundTag": "mullvad-vpn",
         "network": "tcp,udp"
       }
     ]
