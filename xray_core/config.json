@@ -10,7 +10,13 @@
       "listen": "0.0.0.0",
       "protocol": "vless",
       "settings": {
-        "clients": [],
+        "clients": [
+          {
+            "id": "b831381d-6324-4d53-ad4f-8cda48b30811",
+            "level": 0,
+            "email": "user@tunnel"
+          }
+        ],
         "decryption": "none"
       },
       "streamSettings": {
@@ -23,19 +29,17 @@
   ],
   "outbounds": [
     {
-      "tag": "proton-vpn",
+      "tag": "wg-tunnel",
       "protocol": "wireguard",
       "settings": {
-        "secretKey": "CGf1PIsvQ1zhHFh9MAGjbOIyNrwNWxJ/PRYDyAV/fmU=",
+        "secretKey": "QJTUFHHK2WEJT35XMZr9ParzTFxpQZyvFS4sYK5LPEw=",
         "address": [
-          "10.2.0.2/32",
-          "2a07:b944::2:2/128"
+          "10.104.4.183/32"
         ],
         "peers": [
           {
-            "publicKey": "7fu30seb7WT0ViYGe/tkjNzqgJZM3hPa0QF0g/SXnQM=",
-            "endpoint": "95.173.205.163:51820",
-            "keepAlive": 25
+            "publicKey": "26kgTMAJsQmfCVu/2m6T+X1CCjl07EeBUHzBwulFPHo=",
+            "endpoint": "5.196.64.231:25018"
           }
         ],
         "mtu": 1280
@@ -51,7 +55,7 @@
     "rules": [
       {
         "type": "field",
-        "outboundTag": "proton-vpn",
+        "outboundTag": "wg-tunnel",
         "network": "tcp,udp"
       }
     ]
