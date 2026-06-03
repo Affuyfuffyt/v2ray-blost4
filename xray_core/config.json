@@ -23,7 +23,115 @@
   ],
   "outbounds": [
     {
-      "tag": "proton-pl",
+      "tag": "proton-jp2",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "qIZM00yDvhHc/V0fO9NQhakqup6aQkkvQpUW+i7cn2I=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "sfKBCfjDsOGCzxBDvcYTkhCqeWdtjrx6vnAWTW/gfQU=",
+            "endpoint": "138.199.22.102:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-us3",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "kHLJM6VVO2E2SjpsdqK/sJoaolgwxUJlpauFQdhsm20=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "bOz7aS+OtfmIiGLlQmnHrWb+wzw5qFp6PKdWPRlVORc=",
+            "endpoint": "195.181.163.1:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-ca15",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "eG7xWHQf7NY6WpCOvdo4EIV3lisa7doEGxQ3cJLs8m0=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "q7jFh12kfVdVqAEdLxugYLf2+JNCT2HdCJDFbpEIg2c=",
+            "endpoint": "89.238.156.194:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-nl14",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "AB1n1Y64SBWaXR7EHunUfDyY59QPzOyKBhzdUb8tPm4=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "ySR6v9UfcItdDuny/ARauldNXdJFyAzQRcqCLcJTOFE=",
+            "endpoint": "89.39.107.109:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-ca10",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "UCAvV05H747p7mMvZYM/C3GCImQnkmjN8zy7pG0zCnw=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "/A3MV6y7f3NMD0vGPNVqHMkUX/cJQGqM+PrUmxId/Xw=",
+            "endpoint": "149.22.81.1:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-nl12",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "0Bfnb83U8xh6OVFlb0vzWW/iO5/aKZxlZ8r/P6gB4FA=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "1s5mwMp3fZKNucEO3GeHRSUrhGLu/BYeC0UdusyxSWU=",
+            "endpoint": "138.199.7.159:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-pl1",
       "protocol": "wireguard",
       "settings": {
         "secretKey": "8DlXiRUbOFQm7Nuf/Tvba/25oWleEdgTiID5YEL4fmw=",
@@ -41,7 +149,7 @@
       }
     },
     {
-      "tag": "proton-ch",
+      "tag": "proton-ch9",
       "protocol": "wireguard",
       "settings": {
         "secretKey": "AEHREPLCrreSUhmVnjiJJ2h56gBNWaKCps8DBp9Tomg=",
@@ -113,7 +221,10 @@
         "tag": "wg-balancer",
         "selector": [
           "proton-"
-        ]
+        ],
+        "strategy": {
+          "type": "leastPing"
+        }
       }
     ],
     "rules": [
