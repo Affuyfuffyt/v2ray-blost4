@@ -212,7 +212,7 @@
       "proton-"
     ],
     "probeUrl": "https://www.gstatic.com/generate_204",
-    "probeInterval": "1m"
+    "probeInterval": "30s"
   },
   "routing": {
     "domainStrategy": "AsIs",
