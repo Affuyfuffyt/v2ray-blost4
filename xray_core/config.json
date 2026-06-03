@@ -23,18 +23,72 @@
   ],
   "outbounds": [
     {
-      "tag": "warp-native",
+      "tag": "proton-pl",
       "protocol": "wireguard",
       "settings": {
-        "secretKey": "QGJmph51v2dMROxggeJ5XsAWNbkI7QLPimmkQXK7vHU=",
+        "secretKey": "8DlXiRUbOFQm7Nuf/Tvba/25oWleEdgTiID5YEL4fmw=",
         "address": [
-          "172.16.0.2/32",
-          "2606:4700:110:8307:2ef6:e0b2:bb59:7933/128"
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
         ],
         "peers": [
           {
-            "publicKey": "rWiQxq5lAWD8v/bws9ITSAvThyZW8cR2x+Ins9ZvvRo=",
-            "endpoint": "103.124.165.130:3574"
+            "publicKey": "ScCkMvpikYBB3IFtDJC6Xh59pmq4StGlU/JfvALPxUE=",
+            "endpoint": "149.102.244.97:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-ch",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "AEHREPLCrreSUhmVnjiJJ2h56gBNWaKCps8DBp9Tomg=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "2w/1u8pEChF2DeRhJmLDyfbhbkmAidAq0RSNZe+cDTo=",
+            "endpoint": "149.88.27.236:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-nl1",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "EGmQI6Zf+o1+Cx03KTcD740kYRychbzcXB3QIzgYUGg=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "vH2i8RY1qc66XfqwrixBpvH4K9GYJatkugJj0GHgoUQ=",
+            "endpoint": "217.23.3.76:51820"
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "proton-nl38",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "sAiKfkuLy5gt7/6E7tV1Eqf6S0LVShNF6WPPpswWblI=",
+        "address": [
+          "10.2.0.2/32",
+          "2a07:b944::2:2/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "3H83oJvvo4pMX9Lisc1/wNPhnGXoTe6FTubLo8JknSs=",
+            "endpoint": "190.2.153.215:51820"
           }
         ],
         "mtu": 1280
@@ -45,13 +99,28 @@
       "tag": "direct"
     }
   ],
+  "observatory": {
+    "subjectSelector": [
+      "proton-"
+    ],
+    "probeUrl": "https://www.gstatic.com/generate_204",
+    "probeInterval": "1m"
+  },
   "routing": {
     "domainStrategy": "AsIs",
+    "balancers": [
+      {
+        "tag": "wg-balancer",
+        "selector": [
+          "proton-"
+        ]
+      }
+    ],
     "rules": [
       {
         "type": "field",
-        "outboundTag": "warp-native",
-        "network": "tcp,udp"
+        "network": "tcp,udp",
+        "balancerTag": "wg-balancer"
       }
     ]
   }
