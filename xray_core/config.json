@@ -223,7 +223,7 @@
           "proton-"
         ],
         "strategy": {
-          "type": "leastPing"
+          "type": "random"
         }
       }
     ],
