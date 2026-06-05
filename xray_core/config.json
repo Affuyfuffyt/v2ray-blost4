@@ -26,10 +26,10 @@
       "tag": "warp-native",
       "protocol": "wireguard",
       "settings": {
-        "secretKey": "QGJmph51v2dMROxggeJ5XsAWNbkI7QLPimmkQXK7vHU=",
+        "secretKey": "4Bqe1ws5UDo5OKDfnxNRnOupi2vM9fn2Gq25x7IQ6W8=",
         "address": [
           "172.16.0.2/32",
-          "2606:4700:110:8307:2ef6:e0b2:bb59:7933/128"
+          "2606:4700:110:86c4:e0e6:a8ab:f0b8:3e42/128"
         ],
         "peers": [
           {
